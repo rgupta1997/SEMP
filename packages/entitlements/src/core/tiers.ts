@@ -1,8 +1,9 @@
 // The ordered tier. Mirrors the Postgres `tier` enum declared in
 // 20260825000040_tier_enum.sql, and the order here must match the order there -
 // both sides rank by position, so a disagreement would silently grant or deny.
+// `starter` was added BEFORE 'pro' by 20261108000000_saas_plans.sql.
 
-export const TIERS = ['free', 'pro', 'max'] as const;
+export const TIERS = ['free', 'starter', 'pro', 'max'] as const;
 
 export type Tier = (typeof TIERS)[number];
 
@@ -12,8 +13,9 @@ export type Tier = (typeof TIERS)[number];
  */
 export const RANK: Record<Tier, number> = {
   free: 0,
-  pro: 1,
-  max: 2,
+  starter: 1,
+  pro: 2,
+  max: 3,
 };
 
 /** Is `held` at or above `required`? The whole entitlement check, in one line. */
@@ -31,8 +33,8 @@ export function isTier(value: unknown): value is Tier {
  * of the personal ladder as Elite. Display only - never branch on this.
  */
 export const TIER_LABEL: Record<Ladder, Record<Tier, string>> = {
-  org: { free: 'Free', pro: 'Pro', max: 'Enterprise' },
-  personal: { free: 'Free', pro: 'Pro', max: 'Elite' },
+  org: { free: 'Free', starter: 'Starter', pro: 'Pro', max: 'Enterprise' },
+  personal: { free: 'Free', starter: 'Plus', pro: 'Pro', max: 'Elite' },
 };
 
 /**

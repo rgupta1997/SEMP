@@ -7,6 +7,7 @@ import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
 import { BackButton, Button, EmptyState, Spinner, StatusBadge, toast } from '../../components/ui';
+import { useEventPlan } from '../../lib/eventPlan';
 
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
@@ -219,7 +220,29 @@ export function EventLayout() {
         </div>
       )}
 
+      {!archivedAt && canManage && <EventPlanBanner eventId={eventId!} />}
+
       <Outlet context={{ championship, eventId: eventId!, canManage, organises, canManageSport: manageSport } satisfies EventCtx} />
+    </div>
+  );
+}
+
+/**
+ * The event's plan, when it needs saying: the host organisation's plan dropped
+ * below what this event was booked on (grace running), or grace ran out and the
+ * event is read-only. Silent otherwise.
+ */
+function EventPlanBanner({ eventId }: { eventId: string }) {
+  const { plan } = useEventPlan(eventId);
+  if (!plan || (!plan.inGrace && !plan.locked)) return null;
+  const until = plan.graceUntil ? fmtDate(plan.graceUntil) : null;
+  return (
+    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${plan.locked
+      ? 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200'
+      : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'}`}>
+      {plan.locked
+        ? <><span className="font-semibold">This event is read-only.</span> The plan it runs on has ended. Renew the organisation’s subscription to continue - nothing has been deleted.</>
+        : <><span className="font-semibold">Your organisation’s plan has changed.</span> This event keeps running as it is{until ? <> until <b>{until}</b></> : ''}. Renew the subscription before then, or the event becomes read-only.</>}
     </div>
   );
 }

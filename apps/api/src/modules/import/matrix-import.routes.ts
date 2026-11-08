@@ -11,6 +11,7 @@ import { findEntrant } from '../championships/contingent.js';
 import { deriveProvisionedPassword, findUsersByPhones, maskPhone, phoneLast10 } from '../iam/users.helpers.js';
 import { ownerMembership, vouchedBy } from '../iam/member-removal.service.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { grantDefaultOrgPlan } from '../billing/subscription.service.js';
 
 // Champion­ship setup matrix import: turn one 2D spreadsheet (sections × sport/
 // discipline) into the full structure - sports/disciplines mapped in, each section
@@ -251,7 +252,13 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         const key = section.toLowerCase();
         if (orgIdBySection.has(key)) return { orgId: orgIdBySection.get(key)!, champOrgId: champOrgBySection.get(key)! };
         const found = await tx.organizations.findFirst({ where: { name: equalsIgnoreCase(section) }, select: { id: true } });
-        const orgId = found?.id ?? (summary.orgs.created++, (await tx.organizations.create({ data: { name: section, status: true }, select: { id: true } })).id);
+        let orgId = found?.id;
+        if (!orgId) {
+          summary.orgs.created++;
+          orgId = (await tx.organizations.create({ data: { name: section, status: true }, select: { id: true } })).id;
+          // New organisations start on the default plan.
+          await grantDefaultOrgPlan(tx as never, orgId, req.user?.id ?? null);
+        }
         if (found) summary.orgs.existing++;
         // The matrix sheet's sections ARE organisations, so this builds inter-org
         // entrants with no unit. findEntrant + create replaces an upsert whose

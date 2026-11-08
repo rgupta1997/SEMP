@@ -9,6 +9,8 @@ import { AwardTypeFormModal } from '../../features/awards/AwardTypeFormModal';
 import { inScope, ScopeAwardsEditor, type AwardScopeRef, type ChampionshipAward } from '../../features/awards/ScopeAwardsEditor';
 import { LEVEL_LABEL, RECIPIENT_LABEL, type AwardType, type AwardTypeBody } from '../../features/awards/types';
 import { useEvent } from './EventLayout';
+import { useEventPlan } from '../../lib/eventPlan';
+import { CapabilityLock } from '../../components/CapabilityLock';
 
 interface TournamentScope { id: string; name: string; sports: Array<{ id: string; sport_id: string; name: string }> }
 
@@ -23,6 +25,7 @@ export function EventAwardsPage() {
   const { championship, eventId, canManage, organises, canManageSport } = useEvent();
   const archived = !!championship.archived_at;
   const qc = useQueryClient();
+  const awardsOk = useEventPlan(eventId).has('event_awards');
 
   const { data: tournaments = [], isLoading } = useApi<TournamentScope[]>(organises ? `/championships/${eventId}/awards/scopes` : null);
   const { data: awards = [] } = useApi<ChampionshipAward[]>(organises ? `/championships/${eventId}/awards` : null);
@@ -101,6 +104,8 @@ export function EventAwardsPage() {
   }
 
   const countIn = (s: AwardScopeRef) => awards.filter((a) => inScope(a, s)).length;
+
+  if (!awardsOk) return <CapabilityLock capability="event_awards" />;
 
   return (
     <div className="flex flex-col gap-6">

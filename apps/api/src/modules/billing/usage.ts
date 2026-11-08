@@ -1,5 +1,5 @@
 import { ORGANIZATION_MEMBER_ROLE, type Audience } from '@semp/shared';
-import { limitsFor, type LimitKey } from '@semp/entitlements';
+import { limitsIn, type LimitKey } from '@semp/entitlements';
 import { assertWithinOrgLimit, limitState, type LimitState } from '@semp/entitlements/server';
 import type { Tier } from '@semp/entitlements';
 import type { Db, Prisma } from '../../infra/prisma.js';
@@ -51,16 +51,30 @@ export async function countStaffSeats(prisma: Prisma, organizationId: string): P
   });
 }
 
-const COUNTERS: Record<LimitKey, (prisma: Prisma, organizationId: string) => Promise<number>> = {
+/** Every championship this org has ever hosted - the free plan's lifetime allowance. */
+export async function countEventsTotal(prisma: Prisma, organizationId: string): Promise<number> {
+  return prisma.championships.count({ where: { host_organization_id: organizationId } });
+}
+
+/** Campus units, counted the way the multi_campus gate counts them (idx_org_units_org). */
+export async function countCampuses(prisma: Prisma, organizationId: string): Promise<number> {
+  return prisma.org_units.count({ where: { organization_id: organizationId, type: 'campus' } });
+}
+
+type OrgScopedLimit = 'active_events' | 'events_total' | 'people' | 'staff_seats' | 'campuses';
+
+const COUNTERS: Record<OrgScopedLimit, (prisma: Prisma, organizationId: string) => Promise<number>> = {
   active_events: countActiveEvents,
+  events_total: countEventsTotal,
   people: countPeople,
   staff_seats: countStaffSeats,
+  campuses: countCampuses,
 };
 
 /** One limit, counted and resolved against the tier. What a create route asks. */
 export async function usageOf(
   prisma: Prisma,
-  key: LimitKey,
+  key: OrgScopedLimit,
   organizationId: string,
   tier: Tier,
 ): Promise<LimitState> {
@@ -79,7 +93,7 @@ export async function orgUsage(
   organizationId: string,
   tier: Tier,
 ): Promise<LimitState[]> {
-  const keys = limitsFor('org');
+  const keys = limitsIn('org', 'org') as OrgScopedLimit[];
   const counts = await Promise.all(keys.map((k) => COUNTERS[k](prisma, organizationId)));
   return keys.map((k, i) => limitState('org', tier, k, counts[i]));
 }

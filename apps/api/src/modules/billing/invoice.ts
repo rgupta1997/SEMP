@@ -42,6 +42,8 @@ export interface IssueInvoiceInput {
   period: BillingPeriod;
   /** List price in paise, exclusive of tax. */
   amount: number;
+  /** A coupon taken off the list price before GST. */
+  discount?: { paise: number; code: string } | null;
 }
 
 /** Prisma client or transaction client - whichever the caller is holding. */
@@ -54,7 +56,9 @@ type Db = {
 
 export async function issueInvoice(db: Db, input: IssueInvoiceInput): Promise<{ id: string; number: string }> {
   const now = new Date();
-  const taxed = withGst(input.amount);
+  const discount = Math.min(input.discount?.paise ?? 0, input.amount);
+  // GST is charged on what is actually paid, so the discount comes off first.
+  const taxed = withGst(input.amount - discount);
 
   // The buyer, as they are right now. Read once and copied.
   const buyer = input.holder.ladder === 'org'
@@ -78,6 +82,8 @@ export async function issueInvoice(db: Db, input: IssueInvoiceInput): Promise<{ 
       tax_rate_bp: taxed.taxRateBp,
       tax_paise: BigInt(taxed.tax),
       total_paise: BigInt(taxed.total),
+      discount_paise: BigInt(discount),
+      coupon_code: discount > 0 ? input.discount!.code : null,
       ...buyer,
       // Marked paid with provider 'none': access was granted, and the row is
       // honest that no payment was taken for it. A reconciliation later can find

@@ -76,7 +76,7 @@ export function PlanComparison({
       {/* Columns. They scroll sideways on a narrow screen rather than stacking,
           because a plan table read one column at a time is not a comparison. */}
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
-        <div className="grid min-w-[680px] grid-cols-3 gap-4">
+        <div className={`grid gap-4 ${plans.length >= 4 ? 'min-w-[880px] grid-cols-4' : 'min-w-[680px] grid-cols-3'}`}>
           {plans.map((plan) => {
             const isCurrent = plan.tier === current;
             const isPending = pendingPlan === plan.tier;

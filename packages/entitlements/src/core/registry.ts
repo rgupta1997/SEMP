@@ -1,4 +1,5 @@
 import type { Ladder, Tier } from './tiers.js';
+import { activeCatalog } from './catalog.js';
 
 // The capability registry - the single source of truth for what each tier buys.
 //
@@ -26,7 +27,7 @@ export interface CapabilityDef {
 }
 
 export const CAPABILITIES = {
-  // ---- Organisation ladder (11) ------------------------------------------
+  // ---- Organisation ladder ------------------------------------------
   create_event: {
     ladder: 'org', minTier: 'free',
     label: 'Create events',
@@ -52,8 +53,61 @@ export const CAPABILITIES = {
     label: 'Reports',
     surface: 'The Reports page - participation, performance, engagement, event and player reports',
   },
-  multi_campus: {
+  // ---- Event-level (added with the SaaS plans, 2026-11-08) ---------------
+  // Gate what an EVENT may do. Resolved against the event's own plan (see
+  // eventPlan.ts), not only the caller's home org.
+  advanced_formats: {
+    ladder: 'org', minTier: 'starter',
+    label: 'All tournament formats',
+    surface: 'League, round robin, groups + knockout and multi-stage draws, beyond the default format',
+  },
+  manual_schedule: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Manual schedule changes',
+    surface: 'Adding, removing or re-pairing fixtures by hand after the schedule is generated',
+  },
+  standard_points: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Points systems',
+    surface: 'League points, medal tally and placement-plus-match-points standings, beyond the default',
+  },
+  custom_points: {
+    ladder: 'org', minTier: 'pro',
+    label: 'Custom points',
+    surface: 'Entering your own points for every match',
+  },
+  intra_department: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Department events',
+    surface: 'Internal events where your departments or batches compete against each other',
+  },
+  intra_campus: {
+    ladder: 'org', minTier: 'pro',
+    label: 'Campus events',
+    surface: 'Internal events where your campuses compete against each other',
+  },
+  event_communications: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Event communications',
+    surface: 'Announcements and messages to an event’s participants',
+  },
+  event_awards: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Awards',
+    surface: 'Awards for players and teams at an event',
+  },
+  share_links: {
+    ladder: 'org', minTier: 'starter',
+    label: 'Public share links',
+    surface: 'View-only public links to an event’s overview and standings',
+  },
+  white_label: {
     ladder: 'org', minTier: 'max',
+    label: 'White label',
+    surface: 'Your own brand on event pages and emails, with no Sportagon branding',
+  },
+  multi_campus: {
+    ladder: 'org', minTier: 'pro',
     label: 'Campuses and units',
     surface: 'Campuses and nested units, and the campus breakdown on the dashboard',
   },
@@ -83,7 +137,7 @@ export const CAPABILITIES = {
     surface: 'The timestamped record of who did what',
   },
 
-  // ---- Personal ladder (10) ----------------------------------------------
+  // ---- Personal ladder ----------------------------------------------
   play_events: {
     ladder: 'personal', minTier: 'free',
     label: 'Play events',
@@ -150,4 +204,13 @@ export const CAPABILITY_KEYS = Object.keys(CAPABILITIES) as CapabilityKey[];
 
 export function capabilitiesFor(ladder: Ladder): CapabilityKey[] {
   return CAPABILITY_KEYS.filter((k) => CAPABILITIES[k].ladder === ladder);
+}
+
+/**
+ * The lowest tier that grants a capability, AS CONFIGURED. Every reader in the
+ * package goes through this rather than `CAPABILITIES[k].minTier`, which is only
+ * the code default the super-admin console may have moved.
+ */
+export function minTierOf(key: CapabilityKey): Tier {
+  return activeCatalog().minTiers[key] ?? CAPABILITIES[key].minTier;
 }

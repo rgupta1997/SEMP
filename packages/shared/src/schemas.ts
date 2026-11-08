@@ -1303,13 +1303,15 @@ export const assignFixtureOfficialSchema = z.object({
 // in the one package that imports both, rather than a request rejected at runtime.
 // ---------------------------------------------------------------------------
 
-export const PLAN_TIERS = ['free', 'pro', 'max'] as const;
+export const PLAN_TIERS = ['free', 'starter', 'pro', 'max'] as const;
 export const PLAN_PERIODS = ['monthly', 'annual'] as const;
 
 /** Buy or move up. The period is chosen at checkout, not derived. */
 export const subscribeSchema = z.object({
   plan: z.enum(PLAN_TIERS),
   period: z.enum(PLAN_PERIODS),
+  /** A coupon code, validated and redeemed server-side inside the purchase. */
+  coupon: z.string().trim().max(32).optional().nullable(),
 });
 
 /**

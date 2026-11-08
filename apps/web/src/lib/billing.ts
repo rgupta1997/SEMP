@@ -164,7 +164,7 @@ export function annualSavingPct(plan: PlanView): number | null {
   return Math.round(((twelve - annual) / twelve) * 100);
 }
 
-const RANK: Record<Tier, number> = { free: 0, pro: 1, max: 2 };
+const RANK: Record<Tier, number> = { free: 0, starter: 1, pro: 2, max: 3 };
 
 export function isUpgrade(from: Tier, to: Tier): boolean {
   return RANK[to] > RANK[from];

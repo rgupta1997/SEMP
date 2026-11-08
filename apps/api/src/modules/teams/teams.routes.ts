@@ -25,6 +25,7 @@ import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../ia
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
 import { countPeople } from '../billing/usage.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { assertEventLimit, assertRosterRoom, countTeamsInEvent } from '../billing/event-plan.js';
 
 // Validate that a discipline draw belongs to the given championship and (optionally)
 // matches the team's sport. Returns the loaded draw.
@@ -144,6 +145,15 @@ async function assertRosterEditable(prisma: Prisma, teamId: string) {
 }
 
 export function makeTeamsRouter(prisma: Prisma): Router {
+  /** Teams per event, for a batch of entries: one check per event, sized by how many land in it. */
+  const assertTeamRoom = async (championshipIds: string[], actor: { id: string; isSuperAdmin?: boolean }) => {
+    const per = new Map<string, number>();
+    for (const c of championshipIds) per.set(c, (per.get(c) ?? 0) + 1);
+    for (const [cid, adding] of per) {
+      await assertEventLimit(prisma, cid, 'teams_per_event', () => countTeamsInEvent(prisma, cid), { adding, actor });
+    }
+  };
+
   const router = Router();
   const guards = makeGuards(prisma);
 
@@ -288,6 +298,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         : 'Your organization already has a team with this name in this sport');
     }
 
+    // Teams per event is a plan ceiling on the event being entered.
+    if (entryData) {
+      const cid = entryData.championship_id;
+      await assertEventLimit(prisma, cid, 'teams_per_event', () => countTeamsInEvent(prisma, cid), { actor: req.user! });
+    }
     const created = await prisma.$transaction(async (tx) => {
       const team = await tx.teams.create({
         data: { sport_id, organization_id, org_unit_id: orgUnitId, name, short_name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
@@ -386,6 +401,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
     }
 
+    await assertTeamRoom(prepared.map((p) => p.championship_id), req.user!);
     await prisma.$transaction(prepared.map((p) => prisma.team_entries.create({
       data: { team_id: team.id, organization_id: team.organization_id, org_unit_id: team.org_unit_id ?? null, status: 'forming', ...p },
     })));
@@ -574,6 +590,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       if (nameSeen.has(nk)) throw new BusinessRuleError(`A team named "${t.name}" already exists in this sport`);
       nameSeen.add(nk);
     }
+    await assertTeamRoom(teams.map((t) => t.championship_id), req.user!);
     const creatorId = req.user!.id;
     const orgIds = [...new Set(teams.map((t) => t.organization_id))];
     const adminOrgs = new Set<string>();
@@ -822,6 +839,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }
 
   router.post('/teams/:id/members', guards.teamManager, validateBody(addTeamMemberSchema), asyncHandler(async (req, res) => {
+    await assertRosterRoom(prisma, req.params.id, 1, req.user!);
     const member = await addMember(prisma, req.params.id, req.body, req.user!.id);
     res.status(201).json(member);
   }));
@@ -843,6 +861,8 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     }
     const rules = looseAddRules(entries);
     const rows = req.body.members as Array<{ user_id?: string; phone?: string; name?: string; email?: string; role: string; jersey_number?: number | null }>;
+    // People per event: checked against every event this team is entered in.
+    await assertRosterRoom(prisma, team.id, rows.length, req.user!);
 
     // Matched and hashed BEFORE the transaction: bcrypt is slow, and 200 hashes inside
     // it would outlast the transaction's time budget.
@@ -1027,6 +1047,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const team = await prisma.teams.findUnique({ where: { invite_token: req.params.token } });
     if (!team) throw new NotFoundError('Team');
     await assertOrgNotArchived(prisma, team.organization_id);
+    await assertRosterRoom(prisma, team.id, 1, req.user!);
     const member = await addMember(prisma, team.id, { user_id: req.user!.id, role: req.body.role, jersey_number: req.body.jersey_number }, req.user!.id);
     res.status(201).json(member);
   }));

@@ -17,6 +17,7 @@ import { mintRealtimeToken } from './realtime-token.js';
 import { assertNotArchived } from '../championships/championship-archive.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
+import { assertEventCapability } from '../billing/event-plan.js';
 
 // Group raw reaction rows into { emoji, count, mine } for the current user.
 function summarizeReactions(rows: { reaction: string; user_id: string }[], userId: string) {
@@ -144,6 +145,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     }
     // An announcement is a change to the event, and an archived event takes none.
     await assertNotArchived(prisma, req.body.championship_id);
+    await assertEventCapability(prisma, req.body.championship_id, 'event_communications', req.user!);
 
     let audience: AudienceRule;
 
@@ -250,6 +252,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     }
     // The compose modal's send path - the one announcements actually go through.
     await assertNotArchived(prisma, championship_id);
+    await assertEventCapability(prisma, championship_id, 'event_communications', req.user!);
 
     // This endpoint is used by the new audience picker. Do not accept an
     // arbitrary JSON payload that could bypass the audience rule engine.

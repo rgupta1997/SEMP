@@ -10,6 +10,7 @@ import { isPoolShapedFormat, titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
 import { StageConfigWizard } from '../../../components/StageConfigWizard';
+import { useEventPlan } from '../../../lib/eventPlan';
 
 // Ranking/event sports (powerlifting, swimming, athletics) have no head-to-head matches,
 // so they're locked to the "Rankings" format. `eventTemplateFor` is the same per-sport
@@ -20,10 +21,10 @@ const isRankingSport = (sportName?: string | null) => !!eventTemplateFor(sportNa
 /* ----------------------------- Add sports modal ----------------------------- */
 // Tap sport tiles to select several at once; choose a fixture format for each,
 // then add them all. Super admins can also create a brand-new sport inline.
-function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournamentId: string; existingSportIds: Set<string>; onClose: () => void }) {
+function AddSportModal({ tournamentId, existingSportIds, eventId, onClose }: { tournamentId: string; existingSportIds: Set<string>; eventId: string; onClose: () => void }) {
   const { isSuper } = usePermissions();
   const { data: sports = [], isLoading: sportsLoading } = useApi<any[]>('/sports');
-  const { data: formats = [] } = useApi<any[]>('/tournament-formats');
+  const formats = useLockedFormats(eventId);
   // sportId -> chosen format id ('' until picked). Presence = selected.
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [creatingNew, setCreatingNew] = useState(false);
@@ -171,7 +172,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
                 Copy to all
                 <Select value="" onChange={(e) => { if (e.target.value) setAllFormats(e.target.value); }} className="w-44">
                   <option value="">- pick a format -</option>
-                  {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {formatOptions(formats)}
                 </Select>
               </label>
             )}
@@ -186,7 +187,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
               ) : (
                 <Select value={selected[id]} onChange={(e) => setFormat(id, e.target.value)} className="w-56">
                   <option value="">- select a format -</option>
-                  {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {formatOptions(formats)}
                 </Select>
               )}
             </div>
@@ -240,6 +241,10 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sportFormatName = formats.find((f) => f.id === tournamentSport.format_id)?.name;
+  // The event's plan may cap disciplines per sport (Free: one).
+  const plan = useEventPlan(eventId);
+  const discCap = plan.limit('disciplines_per_sport')?.cap ?? null;
+  const discRoom = discCap === null ? Infinity : Math.max(0, discCap - existing.filter((d: any) => d.discipline_id).length);
 
   // Inline "create a new discipline" - this modal is organiser-scoped, so the option
   // is only ever shown to the organiser. The new discipline is added to this sport's
@@ -282,6 +287,12 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   const submit = async () => {
     setError(null);
     if (ids.length === 0) { setError('Tap at least one discipline'); return; }
+    if (ids.filter((id) => id !== WHOLE).length > discRoom) {
+      setError(discRoom === 0
+        ? `This event’s plan includes ${discCap} discipline${discCap === 1 ? '' : 's'} per sport, and this sport is full.`
+        : `This event’s plan includes ${discCap} discipline${discCap === 1 ? '' : 's'} per sport - pick at most ${discRoom} more.`);
+      return;
+    }
     if (wholeSelected && Number(wholeMin) > Number(wholeMax)) { setError('Whole-sport squad min cannot exceed max'); return; }
     const items = ids.map((id) => {
       const base = { tournament_sport_id: tournamentSport.id, venue_id: venueId || null, format_id: formatId || null };
@@ -403,7 +414,7 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
             <Field label="Fixture format" hint="Override the draw, or inherit the sport's format.">
               <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
                 <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-                {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                {formatOptions(formats)}
               </Select>
             </Field>
           </div>
@@ -544,7 +555,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <Field label="Fixture format" hint={formatHint}>
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          {formatOptions(formats)}
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
@@ -623,7 +634,7 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
           ) : (
             <>
               <option value="">- select a format -</option>
-              {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {formatOptions(formats)}
             </>
           )}
         </Select>
@@ -790,7 +801,7 @@ export function SportsTab({ eventId, canManageSport = () => true, canAddSports =
 
   const { data: tsports = [] } = useApi<any[]>(activeTournament ? `/tournament-sports?tournament_id=${activeTournament}` : null);
   const { data: sports = [] } = useApi<any[]>('/sports');
-  const { data: formats = [] } = useApi<any[]>('/tournament-formats');
+  const formats = useLockedFormats(eventId);
   const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
   // All discipline draws for the championship in ONE request (instead of one query
   // per sport row); each SportRow gets the slice for its own tournament_sport.
@@ -835,8 +846,22 @@ export function SportsTab({ eventId, canManageSport = () => true, canAddSports =
         </div>
       )}
 
-      {adding && <AddSportModal tournamentId={activeTournament} existingSportIds={new Set(tsports.map((t) => t.sport_id))} onClose={() => setAdding(false)} />}
+      {adding && <AddSportModal eventId={eventId} tournamentId={activeTournament} existingSportIds={new Set(tsports.map((t) => t.sport_id))} onClose={() => setAdding(false)} />}
       {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues (and the grounds or courts inside each) in the Venue tab - disciplines are assigned a venue, and each fixture a ground.</Badge>}
     </div>
   );
+}
+
+/** Tournament formats, each marked `locked` when this event's plan does not include it. */
+function useLockedFormats(eventId: string) {
+  const { data = [] } = useApi<any[]>('/tournament-formats');
+  const plan = useEventPlan(eventId);
+  return data.map((f) => ({ ...f, locked: !plan.formatAllowed(f.name) }));
+}
+
+/** Format <option>s - a format the plan does not include is shown, locked, and cannot be picked. */
+function formatOptions(formats: any[]) {
+  return formats.map((f) => (
+    <option key={f.id} value={f.id} disabled={!!f.locked}>{f.locked ? `🔒 ${f.name} - not on this plan` : f.name}</option>
+  ));
 }

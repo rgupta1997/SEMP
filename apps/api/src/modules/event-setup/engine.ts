@@ -47,6 +47,7 @@ import { computeParentPosition, propagateByes } from '../fixtures/bracket.js';
 import { assignMatchNos } from '../fixtures/match-no.js';
 import { mintSportagonIds } from '../iam/sportagon-id.js';
 import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../iam/users.helpers.js';
+import { grantDefaultOrgPlan } from '../billing/subscription.service.js';
 
 // ===========================================================================
 // manifest
@@ -835,6 +836,9 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
         settings: { unit_labels: bp.org.unitLabels },
       },
     });
+    // New organisations start on the default plan - unless the blueprint names
+    // one, which the block below applies instead.
+    if (!bp.org.plan || bp.org.plan === 'free') await grantDefaultOrgPlan(prisma as never, orgId, null);
     await created('organizations', [orgId]);
     rOrg.created++;
     rOrg.notes.push(`created "${bp.org.name}" (code ${code})`);

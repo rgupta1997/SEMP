@@ -19,6 +19,7 @@ import {
   newlyAddedMembers, notifyNewOrgMembers,
 } from './organizations.notifications.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { grantDefaultOrgPlan } from '../billing/subscription.service.js';
 // Organizations router: list/get are open reads (the member list is not - see it). Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
@@ -130,6 +131,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     const created = await prisma.$transaction(async (tx) => {
       const org = await tx.organizations.create({ data: { ...organization, status: organization.status ?? true } });
+      // Every new organisation starts on the default plan (Pro unless the console says otherwise).
+      await grantDefaultOrgPlan(tx, org.id, req.user!.id);
       // The authenticated creator is always an owner of the new org.
       await tx.organization_members.create({
         data: { user_id: req.user!.id, organization_id: org.id, ...ownerMembership(req.user!.id) },

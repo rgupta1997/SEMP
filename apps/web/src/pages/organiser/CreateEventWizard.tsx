@@ -84,6 +84,10 @@ export function CreateEventWizard() {
   // explicit choice when there are several. Either way it is what the structure is
   // read from - an intra event competes among the HOST's campuses.
   const resolvedHostId = hostable.length > 1 ? hostOrgId : hostable[0]?.id ?? '';
+  // What the HOST organisation's plan includes - read for the host, not the caller's
+  // home org, exactly as the server checks it.
+  const { data: hostEnt } = useApi<{ org: { capabilities: string[] } }>(resolvedHostId ? `/me/entitlements?organizationId=${resolvedHostId}` : null);
+  const hostGranted = hostEnt?.org.capabilities;
   // Fetched for the host REGARDLESS of the level currently selected.
   //
   // Conditioning this on `isIntraLevel(entryLevel)` deadlocked the form: the level
@@ -265,7 +269,10 @@ export function CreateEventWizard() {
                     const loading = meta.intra && !!resolvedHostId && unitsLoading;
                     const noUnits = meta.intra && !!resolvedHostId && !unitsLoading
                       && (lvl === 'campus' ? activeCampuses.length === 0 : activeDepartments.length === 0);
-                    const disabled = needsHost || loading || noUnits;
+                    // Internal events are a plan capability of the HOST organisation.
+                    const capNeeded = lvl === 'campus' ? 'intra_campus' : lvl === 'department' ? 'intra_department' : null;
+                    const planLocked = !!capNeeded && !!resolvedHostId && !!hostGranted && !hostGranted.includes(capNeeded);
+                    const disabled = needsHost || loading || noUnits || planLocked;
                     return (
                       <label
                         key={lvl}
@@ -293,7 +300,9 @@ export function CreateEventWizard() {
                           </span>
                           <span className="block text-[12.5px] text-slate-500 dark:text-slate-400">
                             {/* A disabled option says WHY, or it reads as broken. */}
-                            {needsHost
+                            {planLocked
+                              ? `🔒 ${capNeeded === 'intra_campus' ? 'Campus events are' : 'Department events are'} not on this organisation’s plan.`
+                              : needsHost
                               ? 'Pick a hosting organisation first - an internal championship runs inside one.'
                               : loading
                                 ? 'Checking your structure…'

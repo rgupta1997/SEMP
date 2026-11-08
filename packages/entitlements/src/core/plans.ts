@@ -1,4 +1,5 @@
-import { capabilitiesFor, CAPABILITIES, type CapabilityKey } from './registry.js';
+import { capabilitiesFor, CAPABILITIES, minTierOf, type CapabilityKey } from './registry.js';
+import { activeCatalog } from './catalog.js';
 import type { LimitSet } from './limits.js';
 import { RANK, TIERS, TIER_LABEL, type Ladder, type Tier } from './tiers.js';
 
@@ -48,6 +49,12 @@ export interface PlanDef {
   adds: readonly string[];
   /** Ceilings on this plan. An absent key is unlimited. */
   limits: LimitSet;
+  /** One-off price to lift ONE event to this plan. null = not sold per event. */
+  eventPass: Paise | null;
+  /** Listed on the plan page. A slot can exist without being sold. */
+  offered: boolean;
+  /** Highlighted as the recommended plan. */
+  featured: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,50 +67,82 @@ export interface PlanDef {
 
 const RUPEE = 100;
 
+/** Code defaults. The super-admin console overlays these - read through planFor(). */
 export const PLANS: Record<Ladder, Record<Tier, PlanDef>> = {
   org: {
     free: {
       ladder: 'org', tier: 'free', name: TIER_LABEL.org.free,
       tagline: 'Run your first event and see the whole thing work.',
       price: { monthly: 0, annual: 0 },
-      selfServe: true,
+      eventPass: null,
+      selfServe: true, offered: true, featured: false,
       adds: [
-        'Create and run an event end to end',
-        'Fixtures, live scoring, standings and results',
+        'Two events, one running at a time',
+        'Up to 8 teams and 100 people per event',
+        'Automatic fixtures in the default format',
+        'Live scoring, standings and results',
         'Certificates on the Sportagon template',
-        'The institution workspace, teams and roll',
       ],
-      limits: { active_events: 1, people: 100, staff_seats: 3 },
+      limits: {
+        active_events: 1, events_total: 2, people: 100, staff_seats: 3, campuses: 1,
+        teams_per_event: 8, participants_per_event: 100, draws_per_event: 3, disciplines_per_sport: 1,
+      },
+    },
+    starter: {
+      ladder: 'org', tier: 'starter', name: TIER_LABEL.org.starter,
+      tagline: 'For a club or department running a few events a year.',
+      price: { monthly: 1_999 * RUPEE, annual: 19_990 * RUPEE },
+      eventPass: 2_999 * RUPEE,
+      selfServe: true, offered: true, featured: false,
+      adds: [
+        'Every tournament format, and manual schedule changes',
+        'League, medal and placement points systems',
+        'Department events inside your institution',
+        'Event announcements, awards and public share links',
+        'Three events at once, 32 teams and 500 people each',
+      ],
+      limits: {
+        active_events: 3, events_total: null, people: 500, staff_seats: 8, campuses: 1,
+        teams_per_event: 32, participants_per_event: 500, draws_per_event: 15, disciplines_per_sport: null,
+      },
     },
     pro: {
       ladder: 'org', tier: 'pro', name: TIER_LABEL.org.pro,
       tagline: 'For an institution running a season, not a one-off.',
       price: { monthly: 4_999 * RUPEE, annual: 49_990 * RUPEE },
-      selfServe: true,
+      eventPass: 6_999 * RUPEE,
+      selfServe: true, offered: true, featured: true,
       adds: [
+        'Campus events, and up to three campuses',
+        'Custom points per match',
         'Bulk roster upload from a spreadsheet',
-        'Your own certificate template, logo and signatories - no Sportagon stamp',
-        'QR verification on every certificate you issue',
+        'Your own certificate template, logo and signatories, with QR verification',
         'The Reports page: participation, performance, engagement',
-        'Five events running at once, and a roll of 1,000',
+        'Ten events at once, 128 teams and 2,000 people each',
       ],
-      limits: { active_events: 5, people: 1_000, staff_seats: 15 },
+      limits: {
+        active_events: 10, events_total: null, people: 2_000, staff_seats: 15, campuses: 3,
+        teams_per_event: 128, participants_per_event: 2_000, draws_per_event: 50, disciplines_per_sport: null,
+      },
     },
     max: {
       ladder: 'org', tier: 'max', name: TIER_LABEL.org.max,
-      tagline: 'For a university group, a board, or anyone with more than one campus.',
+      tagline: 'For a university group, a board, or anyone with many campuses.',
       price: { monthly: null, annual: null },
-      selfServe: false,
+      eventPass: null,
+      selfServe: false, offered: true, featured: false,
       adds: [
-        'Campuses and nested units, with a breakdown per campus',
+        'Unlimited campuses, events, teams and people',
         'Custom roles beyond the system set',
         'Benchmarking against peer institutions',
         'Single sign-on - SAML, OIDC, JIT provisioning, SCIM',
         'API keys, webhooks and a sandbox',
-        'Audit logs - the timestamped record of who did what',
-        'No ceilings on events, people or staff',
+        'Audit logs and white label',
       ],
-      limits: { active_events: null, people: null, staff_seats: null },
+      limits: {
+        active_events: null, events_total: null, people: null, staff_seats: null, campuses: null,
+        teams_per_event: null, participants_per_event: null, draws_per_event: null, disciplines_per_sport: null,
+      },
     },
   },
   personal: {
@@ -111,7 +150,8 @@ export const PLANS: Record<Ladder, Record<Tier, PlanDef>> = {
       ladder: 'personal', tier: 'free', name: TIER_LABEL.personal.free,
       tagline: 'Play, and keep the record of it. Always free.',
       price: { monthly: 0, annual: 0 },
-      selfServe: true,
+      eventPass: null,
+      selfServe: true, offered: true, featured: false,
       adds: [
         'Enter events and see every fixture you are in',
         'Live results and your match history',
@@ -120,11 +160,23 @@ export const PLANS: Record<Ladder, Record<Tier, PlanDef>> = {
       ],
       limits: {},
     },
+    // The personal ladder has no fourth plan. The slot exists because the enum
+    // is shared; it is simply not offered.
+    starter: {
+      ladder: 'personal', tier: 'starter', name: TIER_LABEL.personal.starter,
+      tagline: 'Not offered.',
+      price: { monthly: null, annual: null },
+      eventPass: null,
+      selfServe: false, offered: false, featured: false,
+      adds: [],
+      limits: {},
+    },
     pro: {
       ladder: 'personal', tier: 'pro', name: TIER_LABEL.personal.pro,
       tagline: 'For a player who wants the numbers behind the record.',
       price: { monthly: 149 * RUPEE, annual: 1_299 * RUPEE },
-      selfServe: true,
+      eventPass: null,
+      selfServe: true, offered: true, featured: true,
       adds: [
         'Career statistics and form, sport by sport',
         'Your record exported as a sports CV',
@@ -136,7 +188,8 @@ export const PLANS: Record<Ladder, Record<Tier, PlanDef>> = {
       ladder: 'personal', tier: 'max', name: TIER_LABEL.personal.max,
       tagline: 'For a player being scouted, or trying to be.',
       price: { monthly: 399 * RUPEE, annual: 3_499 * RUPEE },
-      selfServe: true,
+      eventPass: null,
+      selfServe: true, offered: true, featured: false,
       adds: [
         'Percentiles and performance trends against your cohort',
         'AI insights on your profile',
@@ -151,29 +204,53 @@ export const PLANS: Record<Ladder, Record<Tier, PlanDef>> = {
 // Reading the catalogue
 // ---------------------------------------------------------------------------
 
+/**
+ * A plan as configured: the code default with the console's overlay on top.
+ * Limits merge key by key, so the console can move one ceiling without
+ * restating the rest.
+ */
 export function planFor(ladder: Ladder, tier: Tier): PlanDef {
-  return PLANS[ladder][tier];
+  const base = PLANS[ladder][tier];
+  const o = activeCatalog().plans[ladder]?.[tier];
+  if (!o) return base;
+  return {
+    ...base,
+    ...(o.name !== undefined ? { name: o.name } : {}),
+    ...(o.tagline !== undefined ? { tagline: o.tagline } : {}),
+    ...(o.price !== undefined ? { price: o.price } : {}),
+    ...(o.eventPass !== undefined ? { eventPass: o.eventPass } : {}),
+    ...(o.selfServe !== undefined ? { selfServe: o.selfServe } : {}),
+    ...(o.offered !== undefined ? { offered: o.offered } : {}),
+    ...(o.featured !== undefined ? { featured: o.featured } : {}),
+    ...(o.adds !== undefined ? { adds: o.adds } : {}),
+    limits: { ...base.limits, ...(o.limits ?? {}) },
+  };
+}
+
+/** Every slot in order, cheapest first, offered or not. What the console edits. */
+export function planSlots(ladder: Ladder): PlanDef[] {
+  return TIERS.map((t) => planFor(ladder, t));
 }
 
 /** The ladder in order, cheapest first. What the plan page renders as columns. */
 export function planLadder(ladder: Ladder): PlanDef[] {
-  return TIERS.map((t) => PLANS[ladder][t]);
+  return planSlots(ladder).filter((p) => p.offered);
 }
 
 /** Every capability this plan includes. Derived - never a second list. */
 export function capabilitiesOn(ladder: Ladder, tier: Tier): CapabilityKey[] {
-  return capabilitiesFor(ladder).filter((k) => RANK[tier] >= RANK[CAPABILITIES[k].minTier]);
+  return capabilitiesFor(ladder).filter((k) => RANK[tier] >= RANK[minTierOf(k)]);
 }
 
 /** Only what this plan adds over the one below it. Empty on the lowest tier. */
 export function capabilitiesAddedAt(ladder: Ladder, tier: Tier): CapabilityKey[] {
-  return capabilitiesFor(ladder).filter((k) => CAPABILITIES[k].minTier === tier);
+  return capabilitiesFor(ladder).filter((k) => minTierOf(k) === tier);
 }
 
 /** The cheapest plan on this ladder that includes the capability. */
 export function planUnlocking(capability: CapabilityKey): PlanDef {
   const def = CAPABILITIES[capability];
-  return PLANS[def.ladder][def.minTier];
+  return planFor(def.ladder, minTierOf(capability));
 }
 
 export function priceOf(plan: PlanDef, period: BillingPeriod): Paise | null {

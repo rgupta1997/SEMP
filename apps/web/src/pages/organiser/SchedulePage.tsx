@@ -19,6 +19,7 @@ import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 import { StageConfigWizard } from '../../components/StageConfigWizard';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
 import { isPoolShapedFormat, titleCase } from '../../lib/format';
+import { LockMark, useEventPlan } from '../../lib/eventPlan';
 
 /**
  * The scoring entry point, on Schedule.
@@ -336,6 +337,10 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   { fixture: any | null; tdId: string; drawPath: string; sportName?: string; grounds: Ground[]; venues: Venue[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
   const isEdit = !!fixture;
   const { data: teams = [] } = useApi<any[]>(`/teams?tournament_discipline_id=${tdId}`);
+  // Re-pairing, moving in the draw or deleting a match is "manual schedule
+  // changes" - a plan capability. Time, venue, official and score stay editable.
+  const { eventId: fixtureEventId } = useParams();
+  const manualOk = useEventPlan(fixtureEventId).has('manual_schedule');
   const [homeId, setHomeId] = useState(fixture?.home_team_id ?? '');
   const [awayId, setAwayId] = useState(fixture?.away_team_id ?? '');
   // The picker and the typed label are kept apart, so typing can never turn a pool match into a knockout one.
@@ -506,14 +511,14 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         <SectionLabel>Teams</SectionLabel>
         <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 [&>*]:min-w-0">
           <Field compact label="Home team" hint={teamHint}>
-            <Select className="w-full" value={homeId} onChange={(e) => setHomeId(e.target.value)}>
+            <Select className="w-full" value={homeId} disabled={!manualOk} title={manualOk ? undefined : 'Manual schedule changes are not on this event’s plan'} onChange={(e) => setHomeId(e.target.value)}>
               <option value="">- TBD -</option>
               {/* Hide the team already picked as Away - a team can't play itself. */}
               {sortedTeams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
             </Select>
           </Field>
           <Field compact label="Away team">
-            <Select className="w-full" value={awayId} onChange={(e) => setAwayId(e.target.value)}>
+            <Select className="w-full" value={awayId} disabled={!manualOk} title={manualOk ? undefined : 'Manual schedule changes are not on this event’s plan'} onChange={(e) => setAwayId(e.target.value)}>
               <option value="">- TBD / bye -</option>
               {/* Hide the team already picked as Home - a team can't play itself. */}
               {sortedTeams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
@@ -569,7 +574,7 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
           <SectionLabel>Stage & officiating</SectionLabel>
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
             <Field compact label="Round" hint="Knockout rounds decide placings and medals.">
-              <Select className="w-full" value={roundKind} onChange={(e) => setRoundKind(e.target.value)}>
+              <Select className="w-full" value={roundKind} disabled={!manualOk} onChange={(e) => setRoundKind(e.target.value)}>
                 <option value={TABLE_ROUND}>League / pool match</option>
                 {[...KNOCKOUT_CHOICES, ...(roundKind !== TABLE_ROUND && !KNOCKOUT_CHOICES.includes(roundKind) ? [roundKind] : [])].map((r) => (
                   <option key={r} value={r}>{knockoutChoiceLabel(r)}</option>
@@ -581,7 +586,7 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
                 hint={isReservedRoundLabel(label) ? 'This is a knockout round name. Pick it from Round instead - it cannot be used as a label.'
                   : looksKnockout(label) ? 'This reads like a knockout round. Pick it from Round instead, or it counts as a league match.'
                   : 'e.g. Group A, Round 2. Counts as a league / pool match.'}>
-                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={DEFAULT_MATCH_LABEL} />
+                <Input value={label} disabled={!manualOk} onChange={(e) => setLabel(e.target.value)} placeholder={DEFAULT_MATCH_LABEL} />
               </Field>
             )}
             <Field compact label="Status">
@@ -623,11 +628,17 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         </div>
       )}
 
+      {isEdit && !manualOk && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+          <LockMark capability="manual_schedule" className="mt-0.5" />
+          <span>Teams and round come from the generated schedule on this event’s plan. You can still set the time, venue, official and result.</span>
+        </div>
+      )}
       <div className="mt-2 flex items-center justify-between">
         {isEdit ? (
           <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
             onClick={async () => { if (await confirmDialog({ title: 'Delete fixture', confirmLabel: 'Delete', message: 'Delete this fixture? This cannot be undone.' })) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
-            disabled={remove.isPending}
+            disabled={remove.isPending || !manualOk}
             aria-label="Delete fixture"
             title={remove.isPending ? 'Deleting…' : 'Delete fixture'}>
             <Trash2 size={16} />
@@ -714,6 +725,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   const [picking, setPicking] = useState(false);
   const drawNavigate = useNavigate();
   const { eventId: drawEventId } = useParams();
+  const manualOk = useEventPlan(drawEventId).has('manual_schedule');
   const [editingFormat, setEditingFormat] = useState(false);
   // A pool-shaped format (Groups + Knockout and the like) can never be built by the
   // single-stage /fixtures/generate route below - it produces pools XOR a bracket,
@@ -851,7 +863,13 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
           {canManage && isScoredSport(sportName) && (
             <Button size="sm" variant="subtle" disabled={archived} title={archivedTitle} onClick={() => setEditingFormat(true)}>Format</Button>
           )}
-          {canManage && <Button size="sm" variant="subtle" disabled={archived} title={archivedTitle} onClick={() => setCreating(true)}>+ Add fixture</Button>}
+          {canManage && (
+            <Button size="sm" variant="subtle" disabled={archived || !manualOk}
+              title={!manualOk ? 'Manual schedule changes are not on this event’s plan - generate the schedule instead' : archivedTitle}
+              onClick={() => setCreating(true)}>
+              {!manualOk && <LockMark capability="manual_schedule" className="mr-1" />}+ Add fixture
+            </Button>
+          )}
           {canManage && (
             poolShaped ? (
               // Pools feeding a bracket can only ever come from the stage-config

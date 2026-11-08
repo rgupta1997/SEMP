@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { CreditCard, Pencil } from 'lucide-react';
 import { hasPlaceholderContact, isPlaceholderEmail, isPlaceholderPhone } from '@semp/shared';
 import { api } from '../../lib/api';
 import { fmtDate, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
@@ -10,11 +10,15 @@ import {
 import { BulkImportModal } from '../../components/BulkImportModal';
 import { downloadCsvTemplate } from '../../lib/import';
 import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
+import { PlanChangeDialog } from '../../components/PlanChangeDialog';
+
+const PERSONAL_LABEL: Record<string, string> = { free: 'Free', starter: 'Plus', pro: 'Pro', max: 'Elite' };
 
 interface UserRow {
   id: string; name: string; email: string; phone?: string | null;
   is_active: boolean; is_super_admin: boolean; created_at?: string | null;
   organizations?: { id: string; name: string } | null;
+  personal_plan?: string | null;
 }
 
 interface ImportResult {
@@ -47,6 +51,7 @@ export function PlatformUsersPage() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [planFor, setPlanFor] = useState<UserRow | null>(null);
 
   // Bulk-import mapping (applied to every imported row).
   const [mapInstitution, setMapInstitution] = useState('');
@@ -105,6 +110,7 @@ export function PlatformUsersPage() {
                 <th className="px-4 py-2">Contact</th>
                 <th className="px-4 py-2">Organization</th>
                 <th className="px-4 py-2">Joined</th>
+                <th className="px-4 py-2">Plan</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
@@ -130,7 +136,11 @@ export function PlatformUsersPage() {
                   </td>
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '-'}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDate(u.created_at)}</td>
+                  <td className="px-4 py-2"><Badge tone={u.personal_plan && u.personal_plan !== 'free' ? 'brand' : 'slate'}>{PERSONAL_LABEL[u.personal_plan ?? 'free'] ?? u.personal_plan}</Badge></td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <Button size="sm" variant="ghost" onClick={() => setPlanFor(u)} aria-label={`Change plan for ${u.name}`} title="Change personal plan">
+                      <CreditCard size={14} />
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => setEditing(u)} aria-label={`Edit ${u.name}`} title="Edit">
                       <Pencil size={14} />
                     </Button>
@@ -157,6 +167,9 @@ export function PlatformUsersPage() {
         />
       )}
 
+      {planFor && (
+        <PlanChangeDialog target={{ kind: 'user', id: planFor.id, name: planFor.name, current: planFor.personal_plan }} onClose={() => setPlanFor(null)} />
+      )}
       {editing && (
         <UserFormModal
           mode="edit"

@@ -1,3 +1,6 @@
+import { resolveEventPlan, type Tier } from '@semp/entitlements';
+import { plansEnforced } from '@semp/entitlements/server';
+import { PlanLapsedError } from '../billing/event-plan.js';
 import type { RequestHandler } from 'express';
 import { ARCHIVE_RETENTION_DAYS, ARCHIVED_READ_ONLY_MESSAGE, ROLE_CODES, roleWhereByCode, type ChampionshipRemovalMode } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
@@ -137,8 +140,31 @@ export function blockArchivedWritesVia(
     (async () => {
       const championshipId = await championshipOf(id);
       if (!championshipId) return;
-      const champ = await prisma.championships.findUnique({ where: { id: championshipId }, select: { archived_at: true } });
-      if (!champ?.archived_at) return;
+      // One read serves both guards: the archive and the plan's grace lock.
+      const champ = await prisma.championships.findUnique({
+        where: { id: championshipId },
+        select: {
+          archived_at: true, plan_tier: true, plan_source: true, plan_grace_until: true,
+          organizations: { select: { plan: true } },
+        },
+      });
+      if (!champ) return;
+      if (!champ.archived_at) {
+        // A lapsed plan makes the event read-only once its grace runs out. Reads
+        // still work; archive/retrieve still work (they are how you put it away);
+        // super admins pass, for support.
+        if (reading || req.user?.isSuperAdmin || opts.allow?.test(req.path)) return;
+        if (champ.plan_source !== 'org' || !champ.plan_grace_until) return;
+        const plan = resolveEventPlan({
+          orgTier: (champ.organizations?.plan as Tier | undefined) ?? null,
+          planTier: (champ.plan_tier as Tier | null) ?? null,
+          planSource: champ.plan_source,
+          graceUntil: champ.plan_grace_until,
+          enforced: await plansEnforced(prisma as never),
+        });
+        if (plan.locked) throw new PlanLapsedError(plan.graceUntil);
+        return;
+      }
       // Archived: it belongs to its host alone. Anyone else gets the same 404 as an
       // event that does not exist, whatever they were trying to do.
       const user = req.user;

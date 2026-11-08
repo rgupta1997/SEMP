@@ -64,6 +64,9 @@ import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToA
 import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
 import { makeBillingRouter } from '../modules/billing/billing.routes.js';
 import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
+import { makeEventPlanGuards } from '../modules/billing/event-plan.guards.js';
+import { makePlansAdminRouter } from '../modules/billing/plans-admin.routes.js';
+import { ensureCatalog } from '@semp/entitlements/server';
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
@@ -108,6 +111,11 @@ export function buildApp(prisma: Prisma) {
 
   const api = Router();
 
+  // The editable plan catalogue (super-admin console). Cached per instance for a
+  // minute, so this is a no-op on all but ~one request a minute; a failed read
+  // keeps the last good catalogue (or the code defaults) and never fails the request.
+  api.use((_req, _res, next) => { ensureCatalog(prisma).then(() => next(), () => next()); });
+
   // Public auth routes
   // Phone-first sign-in (Option B): identify, code, chooser, session, signup.
   // Mounted before the legacy email+password router so its routes win on overlap.
@@ -147,6 +155,8 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Platform switches (plan enforcement) - super-admin only, guards inside -----
   api.use('/platform/settings', makePlatformSettingsRouter(prisma));
+  // ----- Plans, prices, features, add-ons, coupons; set any org/user/event's plan - super-admin only -----
+  api.use('/platform/billing', makePlansAdminRouter(prisma));
 
   // ----- Award catalogue + sport mapping - super-admin only, guard inside -----
   api.use('/platform/award-types', makeAwardTypesAdminRouter(prisma));
@@ -240,6 +250,23 @@ export function buildApp(prisma: Prisma) {
   // here, ahead of every router that writes to them, including the generic CRUD ones.
   api.use('/fixtures/:id', blockFixtureWritesToArchived(prisma));
   api.use('/tournament-disciplines/:id', blockDrawWritesToArchived(prisma));
+
+  // Plan gates on the generic setup/schedule resources (formats, tournaments per
+  // event, disciplines per sport, manual fixture changes). Mounted ahead of the
+  // CRUD routers below so those stay generic; each is a no-op unless the request
+  // touches what it gates.
+  const planGuards = makeEventPlanGuards(prisma);
+  api.post('/tournament-sports', planGuards.tournamentSportCreate);
+  api.patch('/tournament-sports/:id', planGuards.tournamentSportUpdate);
+  api.post('/tournament-disciplines', planGuards.tournamentDisciplineCreate);
+  api.patch('/tournament-disciplines/:id', planGuards.tournamentDisciplineUpdate);
+  api.post('/fixtures', planGuards.fixtureCreate);
+  api.patch('/fixtures/:id', planGuards.fixtureUpdate);
+  api.delete('/fixtures/:id', planGuards.fixtureDelete);
+  // Event-level awards (above match level) are a plan capability.
+  api.put('/championships/:id/awards', planGuards.eventCapability('event_awards'));
+  api.post('/championships/:id/award-types', planGuards.eventCapability('event_awards'));
+  api.patch('/championships/:id/award-types/:typeId', planGuards.eventCapability('event_awards'));
 
   // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));

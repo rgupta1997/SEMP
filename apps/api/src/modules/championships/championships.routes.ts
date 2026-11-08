@@ -20,6 +20,7 @@ import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
 import { countActiveEvents } from '../billing/usage.js';
+import { assertEventCapability, assertMayCreateEvent, eventPlanView } from '../billing/event-plan.js';
 import { ARCHIVE_RETENTION_DAYS, archivePurgeDate } from '@semp/shared';
 import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
@@ -312,11 +313,20 @@ export function makeEventsRouter(prisma: Prisma): Router {
     });
   }));
 
+  // The plan this event runs on - tier, grace/lock state, granted capabilities and
+  // its per-event ceilings with usage. The workspace renders every lock from this.
+  router.get('/:id/plan', asyncHandler(async (req, res) => {
+    const exists = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!exists) throw new NotFoundError('Championship');
+    res.json(await eventPlanView(prisma, req.params.id));
+  }));
+
   // The view-only public share token for this championship (organiser/super only).
   // The frontend builds the link as `<origin>/c/<token>`.
   router.get('/:id/share-link', ownChampionship, asyncHandler(async (req, res) => {
     const championship = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!championship) throw new NotFoundError('Championship');
+    await assertEventCapability(prisma, req.params.id, 'share_links', req.user!);
     res.json({ token: signShareToken(req.params.id) });
   }));
 
@@ -395,9 +405,10 @@ export function makeEventsRouter(prisma: Prisma): Router {
     //
     // A soft limit - it stops the next creation and nothing else. Finishing an
     // event frees its slot, which is why the count is of unfinished ones.
-    if (hostOrgId) {
-      await assertWithinOrgLimit(prisma, 'active_events', hostOrgId, await countActiveEvents(prisma, hostOrgId));
-    }
+    // (The plan checks themselves - concurrent events, lifetime events for the
+    // free plan, intra-event capability, the solo host's free ceilings - run
+    // inside the creating transaction below, behind one advisory lock, so two
+    // simultaneous creates cannot both fit under the same ceiling.)
 
     // An intra event is contested inside ONE organisation, so it is meaningless
     // without a host: there would be no campuses to enter. Checked here rather than
@@ -425,15 +436,22 @@ export function makeEventsRouter(prisma: Prisma): Router {
     const cities = hostCitiesOf(body);
     if (!cities.length) throw new BusinessRuleError('Add at least one host city.');
 
-    const championship = await prisma.championships.create({
-      data: {
-        ...body,
-        host_cities: cities,
-        venue: citiesLabel(cities),
-        host_organization_id: hostOrgId,
-        entry_level: entryLevel,
-        entry_scope_unit_id: scopeUnitId,
-      } as never,
+    const championship = await prisma.$transaction(async (tx) => {
+      const stamp = await assertMayCreateEvent(tx, {
+        hostOrgId, userId: req.user!.id, isSuperAdmin: !!req.user!.isSuperAdmin, entryLevel,
+      });
+      return tx.championships.create({
+        data: {
+          ...body,
+          host_cities: cities,
+          venue: citiesLabel(cities),
+          host_organization_id: hostOrgId,
+          entry_level: entryLevel,
+          entry_scope_unit_id: scopeUnitId,
+          // The plan this event is booked on - see entitlements core/eventPlan.ts.
+          ...stamp,
+        } as never,
+      });
     });
 
     // "Are you taking part yourself?"
@@ -539,6 +557,11 @@ export function makeEventsRouter(prisma: Prisma): Router {
         if (next) await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, next);
       }
     }
+    // Switching an event to an internal (campus / department) contest is a plan
+    // capability, checked against the HOST organisation like at creation.
+    if (req.body.entry_level === 'department' || req.body.entry_level === 'campus') {
+      await assertEventCapability(prisma, req.params.id, req.body.entry_level === 'campus' ? 'intra_campus' : 'intra_department', req.user!);
+    }
     // Only look up the prior value when the request could actually cause a
     // private -> public flip - a cheap extra query, but not worth paying on every
     // unrelated field update.
@@ -630,6 +653,10 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (champ.archived_with_org) {
       throw new BusinessRuleError('This championship was archived with its organisation. Retrieve the organisation and it comes back too.');
     }
+    // Coming back from the archive makes it count against "events at once" again.
+    if (champ.host_organization_id && !req.user!.isSuperAdmin) {
+      await assertWithinOrgLimit(prisma, 'active_events', champ.host_organization_id, await countActiveEvents(prisma, champ.host_organization_id));
+    }
     await prisma.championships.update({ where: { id: req.params.id }, data: { archived_at: null, archived_by: null } });
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.championshipRetrieved,
@@ -650,6 +677,11 @@ export function makeEventsRouter(prisma: Prisma): Router {
     const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
     if (!championship) throw new NotFoundError('Championship');
     assertChampionshipTransition(championship.status as ChampionshipStatus, req.body.status as ChampionshipStatus);
+    // Reopening a finished event makes it count against "events at once" again.
+    if (championship.status === 'completed' && req.body.status !== 'completed'
+        && championship.host_organization_id && !req.user!.isSuperAdmin) {
+      await assertWithinOrgLimit(prisma, 'active_events', championship.host_organization_id, await countActiveEvents(prisma, championship.host_organization_id));
+    }
     const updated = await prisma.championships.update({ where: { id: req.params.id }, data: { status: req.body.status } });
 
     // Freeze a final, accurate snapshot at the moment of completion (fixture-driven

@@ -43,9 +43,15 @@ export function CheckoutModal({
 }: CheckoutModalProps) {
   // The total comes from the server. The client never computes a price - see the
   // note in lib/billing.ts for why that is not merely tidiness.
-  const quote = useApi<{ quote: Quote | null }>(
-    `/billing/quote?ladder=${ladder}&plan=${plan.tier}&period=${period}`,
+  // A coupon is checked by the quote (never redeemed there) and redeemed by the
+  // purchase itself, inside its transaction.
+  const [couponInput, setCouponInput] = useState('');
+  const [coupon, setCoupon] = useState('');
+  const quote = useApi<{ quote: Quote | null; listPrice?: number; coupon?: { code: string; discount: number; error: string | null } | null }>(
+    `/billing/quote?ladder=${ladder}&plan=${plan.tier}&period=${period}${coupon ? `&coupon=${encodeURIComponent(coupon)}` : ''}`,
   );
+  const couponState = quote.data?.coupon ?? null;
+  const couponOk = !!couponState && !couponState.error;
 
   const [gstin, setGstin] = useState(contact?.billing_gstin ?? '');
   const [billingName, setBillingName] = useState(contact?.billing_name ?? '');
@@ -69,7 +75,7 @@ export function CheckoutModal({
         if (Object.keys(changed).length > 0) await api('PATCH', contactPath, changed);
       }
 
-      await api('POST', subscribePath, { plan: plan.tier, period });
+      await api('POST', subscribePath, { plan: plan.tier, period, coupon: couponOk ? coupon : null });
       toast.success(`You are on ${plan.name}`, 'Everything the plan includes is available now.');
       onDone();
     } catch (e: any) {
@@ -116,6 +122,12 @@ export function CheckoutModal({
 
             {q && (
               <dl className="mt-3 border-t border-eos-line pt-3 text-xs dark:border-slate-800">
+                {couponOk && quote.data?.listPrice !== undefined && (
+                  <>
+                    <Row label="List price" value={formatPaise(quote.data.listPrice)} />
+                    <Row label={`Coupon ${couponState!.code}`} value={`- ${formatPaise(couponState!.discount)}`} />
+                  </>
+                )}
                 <Row label="Subtotal" value={formatPaise(q.subtotal)} />
                 <Row label={`GST (${(q.taxRateBp / 100).toFixed(0)}%)`} value={formatPaise(q.tax)} />
                 <div className="mt-2 flex items-center justify-between border-t border-eos-line pt-2 text-sm font-bold dark:border-slate-800 dark:text-slate-100">
@@ -124,6 +136,17 @@ export function CheckoutModal({
                 </div>
               </dl>
             )}
+          </div>
+
+          {/* Coupon */}
+          <div>
+            <div className="flex gap-2">
+              <Input value={couponInput} placeholder="Coupon code" onChange={(e) => setCouponInput(e.target.value.toUpperCase())} />
+              <Button variant="outline" disabled={!couponInput.trim() || quote.isFetching} onClick={() => setCoupon(couponInput.trim())}>Apply</Button>
+              {coupon && <Button variant="ghost" onClick={() => { setCoupon(''); setCouponInput(''); }}>Remove</Button>}
+            </div>
+            {couponState?.error && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{couponState.error}</p>}
+            {couponOk && <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">Coupon applied.</p>}
           </div>
 
           {/* The invoice is issued to these. Editable here because the moment

@@ -1,7 +1,7 @@
 import { Router, type Request, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { UNIT_TYPES, unitLabels } from '@semp/shared';
-import { assertCapability } from '@semp/entitlements/server';
+import { assertCapability, assertWithinOrgLimit } from '@semp/entitlements/server';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -330,6 +330,8 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
       if (existing >= 1) {
         await assertCapability(prisma, 'multi_campus', { userId: req.user!.id, organizationId: req.params.id });
       }
+      // And how many: the plan's campus ceiling (Pro includes three).
+      if (!req.user!.isSuperAdmin) await assertWithinOrgLimit(prisma, 'campuses', req.params.id, existing);
     }
 
     const row = await prisma.org_units.create({

@@ -10,6 +10,7 @@ import { useWorkspace } from '../../lib/useWorkspace';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 import { Link } from 'react-router-dom';
 import { citiesLabel, hostCitiesFor } from '@semp/shared';
+import { EventPlanCard } from '../../components/EventPlanCard';
 
 export function EventSettingsPage() {
   const navigate = useNavigate();
@@ -126,6 +127,7 @@ export function EventSettingsPage() {
           <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">Use the button in the championship header to advance the lifecycle.</p>
         </CardBody>
       </Card>
+      <EventPlanCard eventId={eventId} name={championship.name} />
     </div>
 
       <StandingsRulesCard eventId={eventId} />

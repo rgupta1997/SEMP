@@ -30,6 +30,7 @@ import { can } from '../../http/middleware/can.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { serialiseInvoice } from './invoice.js';
 import { orgUsage } from './usage.js';
+import { couponProblem, discountFor, normaliseCode, type CouponRow } from './coupons.js';
 import {
   applyDuePlanChanges,
   cancelScheduledDowngrade,
@@ -118,25 +119,7 @@ export function makeBillingRouter(prisma: Prisma): Router {
    * figure the invoice is written from - the client never computes a price.
    */
   router.get('/plans', asyncHandler(async (_req, res) => {
-    const ladder = (l: 'org' | 'personal') => planLadder(l).map((plan) => ({
-      tier: plan.tier,
-      name: plan.name,
-      tagline: plan.tagline,
-      selfServe: plan.selfServe,
-      price: plan.price,
-      adds: plan.adds,
-      limits: plan.limits,
-      capabilities: capabilitiesOn(l, plan.tier).map((k) => ({
-        key: k, label: CAPABILITIES[k].label, surface: CAPABILITIES[k].surface,
-      })),
-    }));
-    res.json({
-      org: ladder('org'),
-      personal: ladder('personal'),
-      // So the client can label a meter without a second registry.
-      limits: LIMITS,
-      taxRateBp: GST_RATE_BP,
-    });
+    res.json(await planCatalogPayload(prisma));
   }));
 
   /** What a purchase would cost, tax included. The checkout screen's only sum. */
@@ -154,7 +137,21 @@ export function makeBillingRouter(prisma: Prisma): Router {
       res.json({ ladder, plan: tier, period, selfServe: false, quote: null });
       return;
     }
-    res.json({ ladder, plan: tier, period, selfServe: plan.selfServe, quote: withGst(amount) });
+    // A coupon is CHECKED here (never redeemed - that happens inside the purchase),
+    // so the checkout shows the discounted total or the reason the code is refused.
+    const code = typeof req.query.coupon === 'string' && req.query.coupon.trim() ? normaliseCode(req.query.coupon) : null;
+    let coupon: { code: string; discount: number; error: string | null } | null = null;
+    if (code) {
+      const row = (await prisma.coupons.findUnique({ where: { code } })) as CouponRow | null;
+      const error = couponProblem(row, { ladder, plan: tier, period });
+      coupon = { code, discount: error || !row ? 0 : discountFor(row, amount), error };
+    }
+    const discount = coupon?.discount ?? 0;
+    res.json({
+      ladder, plan: tier, period, selfServe: plan.selfServe,
+      listPrice: amount, coupon,
+      quote: withGst(amount - discount),
+    });
   }));
 
   // ---- the organisation ladder ------------------------------------------
@@ -441,4 +438,42 @@ async function announcePlanChange(
   } catch {
     // deliberately ignored - see above
   }
+}
+
+/**
+ * The catalogue as the plan page and the landing page render it: offered plans
+ * only, each with its derived capability list, plus the add-ons on sale.
+ * Served from the live (console-edited) catalogue.
+ */
+export async function planCatalogPayload(prisma: Prisma) {
+  const ladder = (l: 'org' | 'personal') => planLadder(l).map((plan) => ({
+    tier: plan.tier,
+    name: plan.name,
+    tagline: plan.tagline,
+    selfServe: plan.selfServe,
+    featured: plan.featured,
+    price: plan.price,
+    eventPass: plan.eventPass,
+    adds: plan.adds,
+    limits: plan.limits,
+    capabilities: capabilitiesOn(l, plan.tier).map((k) => ({
+      key: k, label: CAPABILITIES[k].label, surface: CAPABILITIES[k].surface,
+    })),
+  }));
+  const addons = await prisma.addons.findMany({
+    where: { status: { in: ['available', 'coming_soon'] } },
+    orderBy: [{ sort: 'asc' }, { name: 'asc' }],
+  }).catch(() => []);
+  return {
+    org: ladder('org'),
+    personal: ladder('personal'),
+    // So the client can label a meter without a second registry.
+    limits: LIMITS,
+    taxRateBp: GST_RATE_BP,
+    addons: addons.map((a) => ({
+      key: a.key, name: a.name, description: a.description, unit: a.unit,
+      price: a.price_paise === null ? null : Number(a.price_paise),
+      status: a.status, includedFrom: a.included_from,
+    })),
+  };
 }
