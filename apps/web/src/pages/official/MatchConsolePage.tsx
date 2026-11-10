@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, isSwimmingFixture, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
+import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, isPowerliftingFixture, isSwimmingFixture, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -16,6 +16,7 @@ import {
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, chosenEvents, toggleRace as toggleRaceState, withRelayRows, lineupOf, raceField, setInLineup, setRelayMembers, relayLegs, rankSubEvent, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, withExtraSubEvents, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
+import { POWERLIFTING_LIFTS, liftsOf, liftsTotal, withLift, type LiftKey } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
@@ -3196,6 +3197,14 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // Persist the ranking. `eventStandings` is the self-contained per-org contribution
   // (points + medals) the standings service reads - so events feed the championship table
   // without the server needing the event spec. `complete` signs the event off.
+  // Signing off with no place given would mark the event completed with nothing in it.
+  const signOffRanking = async () => {
+    if (!orgs.some((o) => places[o.id] != null) && !(await confirmDialog({
+      title: 'Nothing is recorded yet', confirmLabel: 'Sign off anyway',
+      message: 'No institute has a place, so this event would be marked completed with no results and no points. You can still add places later.',
+    }))) return;
+    persistRanking(true);
+  };
   const persistRanking = (complete: boolean, quiet = false) => {
     if (quiet && signedOff.current) return; // a late draft: the sign-off stands
     if (complete) signedOff.current = true;
@@ -3261,7 +3270,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
           ))}
           <div className="flex justify-end gap-2 pt-1">
             <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistRanking(false)}>{persist.isPending ? 'Saving…' : 'Save ranking'}</Button>
-            <Button size="sm" disabled={persist.isPending} onClick={() => persistRanking(true)}>Save &amp; sign off</Button>
+            <Button size="sm" disabled={persist.isPending} onClick={signOffRanking}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>
@@ -3468,6 +3477,14 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   };
 
   const persist = useLiveSave(fixtureId, invalidate);
+  const lifts = isPowerliftingFixture(fixture);
+  // One lift typed: the total follows (sum of all three, empty while one is missing).
+  const setLift = (id: string, key: string, lift: LiftKey, n: number | null) => {
+    setTouched(true);
+    signedOff.current = false;
+    if (key === globalCategory) setEnteredHere(true);
+    setState((s) => ({ ...s, participants: s.participants.map((p) => (p.id === id ? withLift(p, key, lift, n) : p)) }));
+  };
   const setMark = (id: string, key: string, n: number | null) => {
     setTouched(true);
     signedOff.current = false;
@@ -3537,6 +3554,32 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
     );
   };
   const save = () => persistEvent(false);
+  // Before sign-off: warn when nothing is recorded, or when a class on this match is still unfinished.
+  const signOffEvent = async () => {
+    const finished = (p: ParticipantResult, key: string) => typeof p.marks[key] === 'number' || !!resultStatusOf(p, key);
+    const keys = spec.subEvents.map((se) => se.key);
+    if (!state.participants.some((p) => keys.some((k) => finished(p, k)))) {
+      if (!(await confirmDialog({
+        title: 'Nothing is recorded yet', confirmLabel: 'Sign off anyway',
+        message: 'No result is entered, so this event would be marked completed with no results and no points. You can still enter results later.',
+      }))) return;
+      persistEvent(true);
+      return;
+    }
+    // Tabs view: every class on screen. One-class view: the class shown.
+    const shown = isNamedDiscipline || spec.subEvents.length < 2 ? (category ? [category] : []) : chosenEvents(state, keys);
+    const gaps = shown.map((key) => {
+      const relayKey = isRelaySubEvent(spec.subEvents.find((se) => se.key === key));
+      const ids = new Set(lineupOf(state, key, relayKey, pickOne));
+      const rows = isNamedDiscipline || spec.subEvents.length < 2 ? state.participants : raceField(state, relayKey).filter((p) => ids.has(p.id));
+      return { label: spec.subEvents.find((se) => se.key === key)?.label ?? noun, done: rows.filter((p) => finished(p, key)).length, total: rows.length };
+    }).filter((g) => g.done < g.total);
+    if (gaps.length && !(await confirmDialog({
+      title: 'Some results are missing', confirmLabel: 'Sign off anyway',
+      message: `${gaps.map((g) => `${g.label}: ${g.done}/${g.total} entered`).join(', ')}.${shown.length > 1 ? ` Signing off completes the whole ${sportNameOf(fixture) ?? 'event'}, not just this tab.` : ''} Missing results can still be added later.`,
+    }))) return;
+    persistEvent(true);
+  };
   // Forty swimmers' times typed into React state and nothing on the server until
   // somebody found Save - the worst of the loss this whole change is about. Two
   // seconds after typing stops the draft joins everything else in the outbox,
@@ -3561,7 +3604,7 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   const subtitle = pickOne
     ? isNamedDiscipline
       ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Add the ${pluralOf(nounLower)} being contested, put each competitor in theirs, then enter their totals${unit}.`
+      : `Add the ${pluralOf(nounLower)} being contested, put each competitor in theirs, then enter their totals${unit}.${lifts ? ' Best squat, bench and deadlift are optional: fill all three and the total adds itself up.' : ''}`
     : isNamedDiscipline
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
       : `Pick the ${nounLower}s being run, then enter each competitor's result in them.`;
@@ -3609,6 +3652,9 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
                       {spec.subEvents.find((se) => se.key === p.category)?.label ?? noun} · {resultStatusOf(p, p.category)
                         ?? `${p.marks[p.category]}${spec.result.unit ? ` ${spec.result.unit}` : ''}`}
                     </span>
+                  ) : category && lifts ? (
+                    <LiftsAndTotal p={p} cat={category} unit={activeMeta.unit} who={p.name || 'competitor'}
+                      onLift={(l, n) => setLift(p.id, category, l, n)} onMark={(n) => setMark(p.id, category, n)} onStatus={(st) => setStatus(p.id, category, st)} />
                   ) : category ? (
                     <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
                       <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
@@ -3631,6 +3677,7 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
             <RaceFirstScoring spec={spec} scoreSpec={scoreSpec} scoringOpts={scoringOpts} state={state} noun={noun} exclusive={pickOne}
               who={isSwimmingFixture(fixture) ? 'swimmer' : pickOne ? 'lifter' : 'competitor'}
               extraChoices={extraChoices} onAddExtra={addExtraRace}
+              onLift={lifts ? setLift : undefined}
               onToggle={toggleRace} onMark={setMark} onStatus={setStatus} onUpdate={updateEvent} />
           ))}
           {blockedOnCategory && (
@@ -3638,7 +3685,7 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
           )}
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
-            <Button size="sm" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
+            <Button size="sm" disabled={persist.isPending || blockedOnCategory} onClick={signOffEvent}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>
@@ -3676,7 +3723,10 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
                         {r.status ? (
                           <span className="shrink-0 text-xs font-semibold text-rose-600 dark:text-rose-400" title={RESULT_STATUS_LABEL[r.status]}>{r.status}</span>
                         ) : (
-                          <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark!) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
+                          <span className="shrink-0 text-right tabular-nums text-slate-500 dark:text-slate-400">
+                            {bMeta.isTime ? formatTime(r.mark!) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}
+                            {r.breakdown && <span className="block text-[11px] text-slate-400 dark:text-slate-500" data-qa="lifts-breakdown">{r.breakdown}</span>}
+                          </span>
                         )}
                       </li>
                     ))}
@@ -3704,13 +3754,15 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
  * scorer chose; each race lists only the swimmers picked for it (a relay: one row per
  * institute, with who swam it). "+ Add race" opens a tile picker.
  */
-function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, extraChoices = [], onAddExtra, onToggle, onMark, onStatus, onUpdate }: {
+function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, extraChoices = [], onAddExtra, onLift, onToggle, onMark, onStatus, onUpdate }: {
   spec: EventSpec; scoreSpec: EventSpec; scoringOpts: EventScoringOpts; state: EventState; noun: string; who: string;
   /** One sub-event per competitor (powerlifting classes): picking someone moves them. */
   exclusive?: boolean;
   /** The event's own named disciplines for this sport, offered beside the built-in list. */
   extraChoices?: Array<{ key: string; label: string }>;
   onAddExtra?: (choice: { key: string; label: string }) => void;
+  /** Powerlifting: squat / bench / deadlift boxes beside the total. */
+  onLift?: (id: string, key: string, lift: LiftKey, n: number | null) => void;
   onToggle: (key: string) => void;
   onMark: (id: string, key: string, n: number | null) => void;
   onStatus: (id: string, key: string, st: ResultStatus | null) => void;
@@ -3965,6 +4017,10 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
                           ) : p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
                         </span>
                       </span>
+                      {onLift ? (
+                        <LiftsAndTotal p={p} cat={current} unit={meta.unit} who={p.name || who}
+                          onLift={(l, n) => onLift(p.id, current, l, n)} onMark={(n) => onMark(p.id, current, n)} onStatus={(st) => onStatus(p.id, current, st)} />
+                      ) : (
                       <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
                         <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
                           <MarkInput
@@ -3976,6 +4032,7 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
                         <StatusSelect value={resultStatusOf(p, current)} onChange={(st) => onStatus(p.id, current, st)}
                           ariaLabel={`${p.name || who} ${se.label} status`} />
                       </div>
+                      )}
                     </div>
                     {relay && membersFor === p.id && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60" data-qa="relay-member-picker">
@@ -4020,7 +4077,63 @@ function StatusSelect({ value, onChange, ariaLabel, className }: { value: Result
   );
 }
 
-function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string; disabled?: boolean }) {
+/**
+ * Powerlifting: optional squat / bench / deadlift best attempts, then the total. With any
+ * lift typed the total is their sum (locked); with none, the total is typed as before.
+ */
+function LiftsAndTotal({ p, cat, unit, who, onLift, onMark, onStatus }: {
+  p: ParticipantResult; cat: string; unit?: string; who: string;
+  onLift: (lift: LiftKey, n: number | null) => void; onMark: (n: number | null) => void; onStatus: (st: ResultStatus | null) => void;
+}) {
+  const status = resultStatusOf(p, cat);
+  const l = liftsOf(p, cat);
+  const t = liftsTotal(l);
+  const label = 'mb-0.5 block text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500';
+  // A 0 is three failed attempts: a bomb-out has no total, so it should be a DNF, not summed.
+  const zeroLift = !status && POWERLIFTING_LIFTS.find((x) => l?.[x.key] === 0);
+  return (
+    <div className="w-full sm:w-auto sm:shrink-0">
+    <div className="flex w-full flex-wrap items-start gap-1.5 sm:flex-nowrap" data-qa="lifts">
+      <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto">
+        {POWERLIFTING_LIFTS.map((x) => (
+          <div key={x.key} className="min-w-0 sm:w-20">
+            <span className={label}>{x.label}</span>
+            <MarkInput value={l?.[x.key] ?? null} isTime={false} disabled={!!status} placeholder="best" nonNegative
+              onChange={(n) => onLift(x.key, n)} ariaLabel={`${who} best ${x.label.toLowerCase()}`} />
+          </div>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1 sm:w-28 sm:flex-none">
+        <span className={label}>Total{unit ? ` (${unit})` : ''}</span>
+        {t.any ? (
+          <div className={cn('grid h-[38px] place-items-center rounded border border-dashed text-sm font-semibold tabular-nums',
+            t.complete ? 'border-slate-300 bg-slate-50 text-slate-800 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100'
+              : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300')}
+            title={t.complete ? 'Sum of the three lifts. Clear them to type a total instead.' : 'Not a total yet: all three lifts are needed.'}
+            aria-label={`${who} total`} data-qa="lifts-total">
+            {t.sum}
+          </div>
+        ) : (
+          <MarkInput value={p.marks[cat] ?? null} isTime={false} disabled={!!status} nonNegative
+            placeholder={placeholderFor(unit)} onChange={onMark} ariaLabel={`${who} total`} />
+        )}
+        {t.any && !t.complete && <span className="mt-0.5 block text-center text-[10px] leading-tight text-amber-700 dark:text-amber-300">Needs all 3 lifts</span>}
+      </div>
+      <div>
+        <span className={cn(label, 'invisible')} aria-hidden>-</span>
+        <StatusSelect value={status} onChange={onStatus} ariaLabel={`${who} status`} />
+      </div>
+    </div>
+    {zeroLift && (
+      <p className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] leading-snug text-amber-800 dark:bg-amber-500/10 dark:text-amber-300" data-qa="zero-lift-hint">
+        No successful {zeroLift.label.toLowerCase()}? That means no total: set DNF instead of 0.
+      </p>
+    )}
+    </div>
+  );
+}
+
+function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled, nonNegative }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string; disabled?: boolean; nonNegative?: boolean }) {
   const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
   const [raw, setRaw] = useState(() => fmt(value));
   const emitted = useRef(value);
@@ -4039,6 +4152,9 @@ function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled }
       return;
     }
     const n = s.trim() === '' ? null : Number(s);
+    // A weight below 0 is a typo: keep the last good value and say why.
+    if (nonNegative && n != null && n < 0) { setError("Can't be negative."); return; }
+    setError(null);
     emitted.current = n;
     onChange(n);
   };
@@ -4046,7 +4162,7 @@ function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled }
     <div className="grid gap-0.5">
       {/* Decimal keypad for every mark: a 182.5 kg total or a 5.42 m jump needs the point on phones. */}
       <Input
-        type={isTime ? 'text' : 'number'} inputMode="decimal" step={isTime ? undefined : 'any'}
+        type={isTime ? 'text' : 'number'} inputMode="decimal" step={isTime ? undefined : 'any'} min={nonNegative ? 0 : undefined}
         value={raw} disabled={disabled} onChange={(e) => handle(e.target.value)} onBlur={() => { if (!error) setRaw(fmt(emitted.current)); }}
         className={cn('text-center', error && 'border-red-400 focus:ring-red-300 dark:border-red-500/60')}
         aria-label={ariaLabel} aria-invalid={!!error || undefined} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}

@@ -14,6 +14,45 @@ export interface ParticipantResult {
   marks: Record<string, number | null>;  // subEvent.key -> mark (time/weight/points)
   /** subEvent.key -> why there is no result: did not start, did not finish, disqualified. */
   statuses?: Record<string, ResultStatus>;
+  /** Powerlifting only, optional: subEvent.key -> best attempt per lift. Their sum is the mark. */
+  lifts?: Record<string, LiftMarks>;
+}
+
+/** The three powerlifting lifts, in competition order. */
+export const POWERLIFTING_LIFTS = [
+  { key: 'squat', label: 'Squat', short: 'S' },
+  { key: 'bench', label: 'Bench', short: 'B' },
+  { key: 'deadlift', label: 'Deadlift', short: 'D' },
+] as const;
+export type LiftKey = (typeof POWERLIFTING_LIFTS)[number]['key'];
+export type LiftMarks = Partial<Record<LiftKey, number | null>>;
+
+/** Sum of the lifts entered; complete only with all three (a missing lift means no total). */
+export function liftsTotal(l?: LiftMarks | null): { sum: number; any: boolean; complete: boolean } {
+  const vals = POWERLIFTING_LIFTS.map((x) => l?.[x.key]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  // Rounded so 102.5 + 70.5 + 120.25 never shows a float tail.
+  return { sum: Math.round(vals.reduce((a, b) => a + b, 0) * 100) / 100, any: vals.length > 0, complete: vals.length === POWERLIFTING_LIFTS.length };
+}
+
+/** The lifts of one category, or null when none was entered. */
+export function liftsOf(p: Pick<ParticipantResult, 'lifts'>, subKey: string): LiftMarks | null {
+  const l = p.lifts?.[subKey];
+  return l && liftsTotal(l).any ? l : null;
+}
+
+/** "S 120 · B 80 · D 150": the breakdown shown beside a total. Null when no lift was entered. */
+export function liftsBreakdown(p: Pick<ParticipantResult, 'lifts'>, subKey: string): string | null {
+  const l = liftsOf(p, subKey);
+  return l ? POWERLIFTING_LIFTS.map((x) => `${x.short} ${typeof l[x.key] === 'number' ? l[x.key] : '-'}`).join(' · ') : null;
+}
+
+/** Set one lift; the mark follows: the sum once all three are in, empty while any is missing. */
+export function withLift(p: ParticipantResult, subKey: string, lift: LiftKey, n: number | null): ParticipantResult {
+  const lifts = { ...(p.lifts?.[subKey] ?? {}), [lift]: n };
+  const t = liftsTotal(lifts);
+  const nextLifts = { ...(p.lifts ?? {}) };
+  if (t.any) nextLifts[subKey] = lifts; else delete nextLifts[subKey];
+  return { ...p, lifts: nextLifts, marks: { ...p.marks, [subKey]: t.complete ? t.sum : null } };
 }
 
 /** Why a competitor has no result in a sub-event. Such a competitor is never ranked. */

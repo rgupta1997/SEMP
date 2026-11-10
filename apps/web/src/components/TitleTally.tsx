@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { formatPoints } from '@semp/shared';
 import { Badge, Segmented, cn } from './ui';
 
@@ -36,19 +37,29 @@ export const hasTally = (s?: SportTally) => !!s && s.titles.some((t) => t.rows.l
 export function TitleTallyCard({ tally }: { tally: SportTally }) {
   const titles = tally.titles.filter((t) => t.rows.length > 0 || t.events.length > 0);
   const [active, setActive] = useState(titles[0]?.name ?? '');
+  // The viewer can fold the table away; it starts open.
+  const [open, setOpen] = useState(true);
   const title = titles.find((t) => t.name === active) ?? titles[0];
   if (!title) return null;
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
+      <div className={cn('flex flex-wrap items-center justify-between gap-2 px-3 py-2', open && 'border-b border-slate-100 dark:border-slate-800')}>
         <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           {tally.sport} · {tally.titles_on ? 'Title tally' : 'Sport tally'}
         </span>
-        {titles.length > 1 && (
-          <Segmented size="sm" value={title.name} onChange={setActive}
-            options={titles.map((t) => ({ value: t.name, label: t.label }))} />
-        )}
+        <span className="flex flex-wrap items-center gap-2">
+          {open && titles.length > 1 && (
+            <Segmented size="sm" value={title.name} onChange={setActive}
+              options={titles.map((t) => ({ value: t.name, label: t.label }))} />
+          )}
+          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-qa="tally-toggle"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/10">
+            {open ? 'Hide table' : 'Show table'}
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
+          </button>
+        </span>
       </div>
+      {open && (<>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -100,6 +111,7 @@ export function TitleTallyCard({ tally }: { tally: SportTally }) {
         Each event column is the club's finishing place. Total adds up the event points{title.events.some((e) => e.share < 1) ? ' (½ events count half)' : ''};
         level totals go by more golds, then more silvers (bronzes are shown for the full count only).{tally.titles_on ? ' Title pts is what this title pays to the overall table.' : ' Titles are off for this sport, so event points go straight to the overall table.'}
       </p>
+      </>)}
     </div>
   );
 }
