@@ -1499,3 +1499,11 @@ export const createSeedBuildSchema = z.object({
   blueprint: seedBlueprintSchema,
 });
 export type CreateSeedBuildInput = z.infer<typeof createSeedBuildSchema>;
+
+// Super-admin "fixtures are live" bulk email: the send carries exactly the user ids
+// the operator confirmed in the audience editor. The server re-validates each against
+// the live audience, so an id that is stale or not emailable is skipped, not trusted.
+export const scheduleEmailSendSchema = z.object({
+  userIds: z.array(z.string().uuid()).min(1).max(20000),
+});
+export type ScheduleEmailSendInput = z.infer<typeof scheduleEmailSendSchema>;
