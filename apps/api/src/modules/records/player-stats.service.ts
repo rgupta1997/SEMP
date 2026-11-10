@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { isCalledDraw, matchJerseys, relayCredits, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
+import { POWERLIFTING_LIFTS, isCalledDraw, matchJerseys, relayCredits, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -121,8 +121,9 @@ export async function buildPlayerStatRows(
       (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
       ?? (fx.live_state as { participants?: unknown } | null)?.participants
       ?? []
-    ) as Array<{ id: string; orgId?: string | null; org?: string | null; marks?: Record<string, number | null>; statuses?: ParticipantResult['statuses'] }>;
+    ) as Array<{ id: string; orgId?: string | null; org?: string | null; marks?: Record<string, number | null>; statuses?: ParticipantResult['statuses']; lifts?: ParticipantResult['lifts'] }>;
     const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
+    const liftsById = new Map(eventParticipants.map((c) => [c.id, c.lifts ?? {}]));
     // Statuses and institute kept, so a DQ is never ranked here when the medals skip it.
     const storedEvent = (fx.live_state as { event?: Pick<EventState, 'relayMembers' | 'extraEvents'> } | null)?.event;
     const relayMembers = storedEvent?.relayMembers;
@@ -180,13 +181,23 @@ export async function buildPlayerStatRows(
         .filter((r) => r.competitorId === p.competitor_id && r.mark != null)
         .map((r) => ({ category: r.subKey, mark: r.mark!, rank: r.rank as number | null }));
       let stats: Record<string, number> = {};
+      let bestCategory: string | null = null;
       if (entries.length || relayEntries.length) {
         const ranked = [...entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) })), ...relayEntries];
         const best = ranked.reduce(betterOf);
+        bestCategory = best.category;
         // `measured`/`podium` are unit-free counts, so unlike `mark` they stay
         // meaningful summed across categories that don't share a unit.
         stats = { mark: best.mark, measured: 1 };
         if (best.rank != null) { stats.rank = best.rank; if (best.rank <= 3) stats.podium = 1; }
+      }
+      // Powerlifting lifts come from the same class as the total (partial lifts with no total still count).
+      // A 0 is a failed lift, never a best.
+      const lifts = p.competitor_id ? liftsById.get(p.competitor_id) ?? {} : {};
+      const liftCategory = bestCategory ?? Object.keys(lifts)[0];
+      for (const l of POWERLIFTING_LIFTS) {
+        const v = liftCategory ? lifts[liftCategory]?.[l.key] : null;
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) stats[l.key] = v;
       }
       return {
         fixture_id: fx.id,

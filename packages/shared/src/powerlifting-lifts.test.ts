@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { liftsBreakdown, liftsTotal, withLift, type ParticipantResult } from './event-scoring.js';
+import { foldCareerStats, statSpecFor } from './stat-registry.js';
 
 const lifter = (): ParticipantResult => ({ id: 'a', name: 'A', marks: { m63: 300 } });
 
@@ -22,5 +23,18 @@ describe('powerlifting lifts', () => {
   it('sums partial lifts without calling them complete', () => {
     expect(liftsTotal({ squat: 100, bench: 60 })).toEqual({ sum: 160, any: true, complete: false });
     expect(liftsTotal(undefined)).toEqual({ sum: 0, any: false, complete: false });
+  });
+  it('career stats keep the best and average of each lift across events', () => {
+    const spec = statSpecFor('Powerlifting')!;
+    const career = foldCareerStats(spec, [
+      { mark: 430, rank: 1, squat: 150, bench: 100, deadlift: 180 },
+      { mark: 445, rank: 2, squat: 160, bench: 95, deadlift: 190 },
+      { squat: 170 },
+    ]);
+    expect(career).toMatchObject({
+      personal_best: 445, best_squat: 170, best_bench: 100, best_deadlift: 190,
+      // Each average is over the events that recorded that lift.
+      average_squat: 160, average_bench: 97.5, average_deadlift: 185,
+    });
   });
 });

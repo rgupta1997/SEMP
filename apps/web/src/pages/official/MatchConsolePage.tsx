@@ -3876,6 +3876,7 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
   const medal = (r: number) => r === 1 ? 'bg-amber-400 text-amber-950' : r === 2 ? 'bg-slate-300 text-slate-900' : r === 3 ? 'bg-orange-400 text-orange-950' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
   const choosing = choosingFor === current || rows.length === 0;
   const pickWord = relay ? 'teams' : `${who}s`;
+  const boxWord = meta.isTime ? 'a time box' : onLift ? 'boxes for their lifts' : 'a result box';
 
   // Taking someone out clears their result in this race, so ask first when there is one.
   const setIn = async (p: ParticipantResult, inIt: boolean) => {
@@ -3990,7 +3991,7 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
           {field.length === 0 ? (
             <p className="px-3 py-4 text-sm text-slate-400 dark:text-slate-500">No registered entrants yet.</p>
           ) : rows.length === 0 ? (
-            <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">Pick the {pickWord} in this {nounLower} above - only they get a time box.</p>
+            <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">Pick the {pickWord} in this {nounLower} above - only they get {boxWord}.</p>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800" data-qa="race-rows"
               onFocus={() => setFrozenOrder((f) => f ?? ordered.map((p) => p.id))}
