@@ -1248,7 +1248,8 @@ export function TeamDeck(p: TeamDeckProps) {
 
       {/* ── The footer: never moves ──────────────────────────────────────── */}
       <Card className="shrink-0 px-2 py-1.5">
-        <div className="flex items-center gap-1 min-[360px]:gap-1.5">
+        {/* Six buttons don't fit a phone row: while Redo shows, the whistle takes its own row. */}
+        <div className={cn('flex items-center gap-1 min-[360px]:gap-1.5', redoNext && 'max-sm:flex-wrap')}>
           {/* THE WHISTLE IS THE ONLY FILLED BUTTON DOWN HERE.
               It was one small button in a row of four identically sized ones, and
               two of the others turned brand-filled whenever their panel was open -
@@ -1259,7 +1260,7 @@ export function TeamDeck(p: TeamDeckProps) {
           {/* No period left to end once a shoot-out, minimum chase or innings win decides it. */}
           {clockPeriods && !state.ended && progress.phase !== 'penalties' && progress.phase !== 'minimumChase' && !khoNow?.wonByInnings && (
             <Button size="sm" variant="primary" data-qa="end-period"
-              className={cn('h-9 min-w-0 flex-1 text-sm font-bold max-[359px]:px-2',
+              className={cn('h-9 min-w-0 flex-1 text-sm font-bold max-[359px]:px-2', redoNext && 'max-sm:basis-full',
                 // Past full time the whistle is OVERDUE, and the button says so. It
                 // still does not blow itself - stoppage time is the official's call,
                 // and a clock that ended halves would end them mid-added-time.

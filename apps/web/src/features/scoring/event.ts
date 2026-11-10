@@ -7,7 +7,7 @@
 import type { EventSpec } from '@semp/shared';
 import {
   aggregateEvent, placementPoints, rankSubEvent,
-  resultStatusOf, RELAY_ROW_PREFIX,
+  resultStatusOf, liftsBreakdown, liftsOf, RELAY_ROW_PREFIX,
   type AggRow, type EventOrgContribution, type EventScoringOpts, type EventState, type ParticipantResult, type ResultStatus,
 } from '@semp/shared';
 
@@ -16,10 +16,17 @@ export type { AggRow, EventOrgContribution, EventState, ParticipantResult };
 
 export function initEvent(): EventState { return { participants: [] }; }
 
-/** A result (a mark, or DNS / DNF / DQ) in this category. */
+/** A result (a mark, DNS / DNF / DQ, or lifts still being entered) in this category. */
 export function hasResultIn(p: ParticipantResult, cat?: string | null): boolean {
-  return !!cat && (typeof p.marks[cat] === 'number' || !!resultStatusOf(p, cat));
+  return !!cat && (typeof p.marks[cat] === 'number' || !!resultStatusOf(p, cat) || !!liftsOf(p, cat));
 }
+
+/** Drop a category's lifts along with its mark. */
+const withoutLifts = (p: ParticipantResult, key: string): Pick<ParticipantResult, 'lifts'> => {
+  if (!p.lifts?.[key]) return p.lifts ? { lifts: p.lifts } : {};
+  const { [key]: _l, ...lifts } = p.lifts;
+  return { lifts };
+};
 
 /**
  * The sub-events on screen: the ones the scorer chose, then any other with a result in it,
@@ -42,7 +49,7 @@ export function toggleEvent(state: EventState, keys: string[], key: string): Eve
     participants: state.participants.map((p) => {
       const { [key]: _m, ...marks } = p.marks;
       const { [key]: _s, ...statuses } = p.statuses ?? {};
-      return { ...p, marks, ...(p.statuses ? { statuses } : {}) };
+      return { ...p, marks, ...(p.statuses ? { statuses } : {}), ...withoutLifts(p, key) };
     }),
   };
 }
@@ -109,7 +116,7 @@ export function lineupOf(state: EventState, key: string, relay: boolean, exclusi
 const clearIn = (p: ParticipantResult, key: string): ParticipantResult => {
   const { [key]: _m, ...marks } = p.marks;
   const { [key]: _s, ...statuses } = p.statuses ?? {};
-  return { ...p, marks, ...(p.statuses ? { statuses } : {}) };
+  return { ...p, marks, ...(p.statuses ? { statuses } : {}), ...withoutLifts(p, key) };
 };
 
 /** Put a row in a race or take it out; out also clears its result there (and relay swimmers). */
@@ -194,6 +201,7 @@ export function hydrateEvent(raw: any): EventState {
       category: typeof p?.category === 'string' ? p.category : null,
       marks: p?.marks && typeof p.marks === 'object' ? p.marks : {},
       ...(p?.statuses && typeof p.statuses === 'object' ? { statuses: p.statuses } : {}),
+      ...(p?.lifts && typeof p.lifts === 'object' ? { lifts: p.lifts } : {}),
     })),
   };
 }
@@ -244,7 +252,7 @@ export interface RankRow { orgId: string | null; org: string; place: number | nu
 // where, and what their org earned"). Only meaningful for rank-based aggregates
 // (medals/placePoints); a sumBest event has no per-sub ranking, so this returns [].
 /** A placed finisher (rank, mark), or one with a DNS / DNF / DQ (no rank, no points). */
-export interface SubEventRow { rank: number | null; name: string; org?: string | null; mark: number | null; points: number; status?: ResultStatus }
+export interface SubEventRow { rank: number | null; name: string; org?: string | null; mark: number | null; points: number; status?: ResultStatus; breakdown?: string | null }
 export interface SubEventBlock { key: string; label: string; rows: SubEventRow[] }
 
 export function subEventResults(spec: EventSpec, state: EventState, opts: EventScoringOpts = {}): SubEventBlock[] {
@@ -261,7 +269,7 @@ export function subEventResults(spec: EventSpec, state: EventState, opts: EventS
       const p = state.participants.find((x) => x.id === pid);
       if (!p) continue;
       const points = spec.result.aggregate === 'medals' ? (medals[rank - 1] ?? 0) : Math.max(0, n - rank + 1);
-      rows.push({ rank, name: p.name || 'Unnamed', org: p.org ?? null, mark: p.marks[se.key] as number, points });
+      rows.push({ rank, name: p.name || 'Unnamed', org: p.org ?? null, mark: p.marks[se.key] as number, points, breakdown: liftsBreakdown(p, se.key) });
     }
     rows.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
     // Then whoever has a status, so the record says why they were not placed.

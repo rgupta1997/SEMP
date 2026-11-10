@@ -191,6 +191,38 @@ describe('buildPlayerStatRows · ranking events', () => {
     expect(rows[0].stats).toEqual({});
   });
 
+  it('records the best squat, bench and deadlift beside the total; partial lifts count, a 0 does not', async () => {
+    const db = fakeDb({
+      id: 'fx1', round: 'Final', stage_sequence: null,
+      home_team_id: null, away_team_id: null,
+      lock_version: 1, scheduled_at: new Date('2026-09-13'),
+      winner_team_id: null, home_score: null, away_score: null,
+      tournament_disciplines: {
+        tournament_sports: { sport_id: 'sport-pl', sports: { name: 'Powerlifting' } },
+      },
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Full', marks: { m74: 430 }, lifts: { m74: { squat: 150, bench: 100, deadlift: 180 } } },
+        // Squat only, no total yet: the squat still counts.
+        { id: 'c2', name: 'Partial', marks: {}, lifts: { m74: { squat: 140 } } },
+        // Failed every bench: the 0 is not a best.
+        { id: 'c3', name: 'Zero', marks: { m74: 300 }, lifts: { m74: { squat: 130, bench: 0, deadlift: 170 } } },
+      ] } },
+    });
+    const participants: FixtureParticipants = {
+      resolved: [
+        { user_id: 'a', team_id: 'ta', organization_id: 'org1', competitor_id: 'c1', name: 'Full' },
+        { user_id: 'b', team_id: 'tb', organization_id: 'org2', competitor_id: 'c2', name: 'Partial' },
+        { user_id: 'c', team_id: 'tc', organization_id: 'org3', competitor_id: 'c3', name: 'Zero' },
+      ],
+      unmatched: [],
+    };
+    const rows = await buildPlayerStatRows(db, 'fx1', participants);
+    const by = (uid: string) => rows.find((r) => r.user_id === uid)!.stats;
+    expect(by('a')).toEqual({ mark: 430, rank: 1, measured: 1, podium: 1, squat: 150, bench: 100, deadlift: 180 });
+    expect(by('b')).toEqual({ squat: 140 });
+    expect(by('c')).toEqual({ mark: 300, rank: 2, measured: 1, podium: 1, squat: 130, deadlift: 170 });
+  });
+
   it('writes nothing when nobody could be resolved to an account', async () => {
     const db = fakeDb({
       id: 'fx1', round: 'Final', stage_sequence: null,
