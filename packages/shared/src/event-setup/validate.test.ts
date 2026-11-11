@@ -294,6 +294,22 @@ describe('Draws sheet', () => {
     expect(draws.map((d) => d.key)).toEqual(['d1', 'd2', 'd3']);
     expect(draws[1]).toMatchObject({ sport: 'Cricket', format: 'Knockout', thirdPlace: true });
   });
+
+  it('parses League+Knockout and Rankings, and rejects Rankings on a match sport', () => {
+    const s = tiny();
+    s.Draws = [
+      ['Sport', 'Discipline', 'Format', 'Squad min', 'Squad max'],
+      ['Football', 'Mixed', 'League+Knockout', '6', '10'],
+      ['Swimming', 'Open', 'Rankings', '', ''],
+      ['Football', "Women's", 'Rankings', '6', '10'],
+    ];
+    const r = run('intra', s);
+    const draws = bp(r).draws;
+    expect(draws.find((d) => d.sport === 'Football' && d.discipline === 'Mixed')?.format).toBe('League+Knockout');
+    expect(draws.find((d) => d.sport === 'Swimming')?.format).toBe('Rankings');
+    // Rankings on a match sport (Football) is rejected.
+    expect(codes(r, 'error')).toEqual(expect.arrayContaining(['bad_value']));
+  });
 });
 
 // ---------------------------------------------------------------------------

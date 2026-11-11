@@ -1,15 +1,16 @@
 /**
- * Does this format's name mean "pool stage(s) feeding a knockout", so ONLY the
+ * Does this format's name mean "a group/league stage feeding a knockout", so ONLY the
  * stage-config wizard (never the plain single-stage Generate button) can build it
- * correctly? Mirrors the exact substring test the backend's own dispatcher uses to
- * pick a generator (apps/api/.../fixtures/domain/generators/index.ts) - the two
- * must never disagree about what counts as pool-shaped, or a format the wizard
- * thinks it owns could still fall through to the single-stage route, and vice
- * versa. Shared here (rather than duplicated per screen) so that stays true.
+ * correctly? Covers Groups+Knockout (pool/group) AND League+Knockout / Round-robin+
+ * Knockout - a league is a single pool, so those are two-stage too. Plain Knockout and
+ * plain League stay single-stage (they have no second stage to seed). The event-setup
+ * importer builds only the group/league stage for these; the knockout is added here via
+ * the wizard, which is why this must light up for every two-stage name.
  */
 export function isPoolShapedFormat(name?: string | null): boolean {
   const n = (name ?? '').trim().toLowerCase();
-  return n.includes('pool') || n.includes('group');
+  if (n.includes('pool') || n.includes('group')) return true;
+  return n.includes('knockout') && (n.includes('league') || n.includes('round robin') || n.includes('round-robin'));
 }
 
 // Title-case an enum/snake_case value for display: 'registration_open' -> 'Registration Open'.
