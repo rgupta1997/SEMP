@@ -24,12 +24,31 @@ const TEMPLATE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
 <title>{{event_name}} — Your schedule is live</title>
 <!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet"><!--<![endif]-->
 <style>
+  :root{color-scheme:light;supported-color-schemes:light}
   body{margin:0;padding:0;background:#EDF0F7}
   a{text-decoration:none}
   .nw{white-space:nowrap}
+  /* The navy header, footer and the CTA are dark BY DESIGN. Dark-mode engines
+     (notably the Gmail app) re-colour them and turn the white text black. Re-assert
+     the brand colours so the mail looks identical in light and dark. Gmail injects
+     the data-ogsc/data-ogsb hooks; prefers-color-scheme covers Apple Mail etc. */
+  [data-ogsb] .darkbg{background-color:#0B1E5B!important}
+  [data-ogsc] .ondark,[data-ogsc] .ondark a{color:#ffffff!important}
+  [data-ogsc] .ondark-sub{color:#D6DEF8!important}
+  [data-ogsc] .ondark-faint{color:#9FB2EE!important}
+  [data-ogsc] .cta-a{color:#ffffff!important}
+  @media (prefers-color-scheme:dark){
+    .darkbg{background-color:#0B1E5B!important}
+    .ondark,.ondark a{color:#ffffff!important}
+    .ondark-sub{color:#D6DEF8!important}
+    .ondark-faint{color:#9FB2EE!important}
+    .cta-a{color:#ffffff!important}
+  }
   @media (max-width:620px){
     .wrap{width:100%!important}
     .px{padding-left:18px!important;padding-right:18px!important}
@@ -54,10 +73,10 @@ const TEMPLATE = `<!doctype html>
   <table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
 
     <!-- Header -->
-    <tr><td class="px" style="background:#0B1E5B;background-image:linear-gradient(120deg,#081646 0%,#0B1E5B 55%,#1A3594 100%);padding:22px 36px;font-family:Montserrat,Arial,sans-serif;">
-      <a href="{{schedule_link}}" target="_blank" style="font-size:26px;line-height:30px;font-weight:900;letter-spacing:0.5px;text-transform:uppercase;color:#ffffff;">{{event_name}}</a>
-      <p style="margin:8px 0 0;font-size:13px;font-weight:600;color:#D6DEF8;"><span class="nw">{{event_dates}}</span> &nbsp;|&nbsp; <span class="nw">{{event_venue}}</span></p>
-      <p class="sm" style="margin:6px 0 0;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#9FB2EE;"><span class="nw">{{stat_1_value}} {{stat_1_label}}</span> &nbsp;·&nbsp; <span class="nw">{{stat_2_value}} {{stat_2_label}}</span> &nbsp;·&nbsp; <span class="nw">{{stat_3_value}} {{stat_3_label}}</span></p>
+    <tr><td class="px darkbg" bgcolor="#0B1E5B" style="background:#0B1E5B;background-image:linear-gradient(120deg,#081646 0%,#0B1E5B 55%,#1A3594 100%);padding:22px 36px;font-family:Montserrat,Arial,sans-serif;">
+      <a class="ondark" href="{{schedule_link}}" target="_blank" style="font-size:26px;line-height:30px;font-weight:900;letter-spacing:0.5px;text-transform:uppercase;color:#ffffff;">{{event_name}}</a>
+      <p class="ondark-sub" style="margin:8px 0 0;font-size:13px;font-weight:600;color:#D6DEF8;"><span class="nw">{{event_dates}}</span> &nbsp;|&nbsp; <span class="nw">{{event_venue}}</span></p>
+      <p class="sm ondark-faint" style="margin:6px 0 0;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#9FB2EE;"><span class="nw">{{stat_1_value}} {{stat_1_label}}</span> &nbsp;·&nbsp; <span class="nw">{{stat_2_value}} {{stat_2_label}}</span> &nbsp;·&nbsp; <span class="nw">{{stat_3_value}} {{stat_3_label}}</span></p>
     </td></tr>
 
     <!-- Greeting -->
@@ -74,7 +93,7 @@ const TEMPLATE = `<!doctype html>
       </v:roundrect>
       <![endif]-->
       <!--[if !mso]><!-->
-      <a class="cta" href="{{schedule_link}}" target="_blank" style="display:inline-block;background:#2346D8;background-image:linear-gradient(135deg,#1A3594,#2F5BF0);color:#ffffff;box-shadow:0 8px 20px rgba(35,70,216,.28);font-family:Montserrat,Arial,sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;padding:16px 40px;border-radius:999px;white-space:nowrap;">View the full schedule &rarr;</a>
+      <a class="cta cta-a ondark" href="{{schedule_link}}" target="_blank" style="display:inline-block;background:#2346D8;background-image:linear-gradient(135deg,#1A3594,#2F5BF0);color:#ffffff;box-shadow:0 8px 20px rgba(35,70,216,.28);font-family:Montserrat,Arial,sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;padding:16px 40px;border-radius:999px;white-space:nowrap;">View the full schedule &rarr;</a>
       <!--<![endif]-->
       <p style="margin:12px 0 0;font-size:12px;line-height:18px;color:#8A93AD;font-family:Montserrat,Arial,sans-serif;">You'll be asked to log in — the schedule opens straight after.</p>
     </td></tr>
@@ -112,10 +131,10 @@ const TEMPLATE = `<!doctype html>
     </td></tr>
 
     <!-- Footer -->
-    <tr><td class="px" style="background:#0B1E5B;padding:16px 36px;font-family:Montserrat,Arial,sans-serif;font-size:11px;line-height:19px;color:#9FB2EE;letter-spacing:0.3px;">
-      <span style="color:#ffffff;font-weight:900;letter-spacing:2.5px;">SPORTAGON EOS</span><br>
-      <span>Official event platform for {{event_name}}</span><br>
-      <a href="https://www.sportagon.in" style="color:#ffffff;text-decoration:underline;">www.sportagon.in</a>
+    <tr><td class="px darkbg ondark-faint" bgcolor="#0B1E5B" style="background:#0B1E5B;padding:16px 36px;font-family:Montserrat,Arial,sans-serif;font-size:11px;line-height:19px;color:#9FB2EE;letter-spacing:0.3px;">
+      <span class="ondark" style="color:#ffffff;font-weight:900;letter-spacing:2.5px;">SPORTAGON EOS</span><br>
+      <span class="ondark-faint">Official event platform for {{event_name}}</span><br>
+      <a class="ondark" href="https://www.sportagon.in" style="color:#ffffff;text-decoration:underline;">www.sportagon.in</a>
     </td></tr>
 
   </table>
