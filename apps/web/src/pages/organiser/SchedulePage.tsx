@@ -774,6 +774,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   // Same substring test the backend's generator dispatch and the Setup → Sports
   // "Configure stages" button both use - see isPoolShapedFormat's own doc comment.
   const poolShaped = isPoolShapedFormat(formatLabel);
+  // A two-stage draw whose group/league exists but whose knockout hasn't been built yet
+  // (e.g. straight after the Excel import, which builds only the group/league stage).
+  const knockoutPending = poolShaped && fixtures.length > 0 && !multiStage;
   const branchLabels = resolveBranchLabels(td.format_config);
   const stageLabel = (seq: number, groupHasBracket: boolean) =>
     branchLabels.get(seq) ?? (seq === 1 ? (groupHasBracket ? 'Bracket' : 'Pools') : `Stage ${seq}`);
@@ -857,14 +860,14 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
               // Pools feeding a bracket can only ever come from the stage-config
               // wizard (generate-all) - the plain single-stage route below can never
               // produce both, so it is not offered at all for this shape of format.
-              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={hasPlayed || archived}
+              <Button size="sm" variant={knockoutPending ? 'primary' : (fixtures.length ? 'outline' : 'primary')} disabled={hasPlayed || archived}
                 title={archivedTitle ?? (hasPlayed
                   ? 'This draw has played matches - reconfiguring would erase those results.'
-                  : fixtures.length > 0 && !multiStage
-                    ? "This draw was built without its knockout stage - reconfigure it to add one."
+                  : knockoutPending
+                    ? 'The group/league stage is built. Set up the knockout and choose how many advance.'
                     : undefined)}
                 onClick={() => setConfiguringStages(true)}>
-                {fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
+                {knockoutPending ? 'Set up knockout' : fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
               </Button>
             ) : (
               <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={archived || generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
@@ -884,6 +887,12 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         </div>
       </div>
       <div className="mt-3">
+        {canManage && knockoutPending && !hasPlayed && !archived && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
+            <span>The {isLeague ? 'league' : 'group'} stage is set up. Next, add the knockout and choose how many teams advance.</span>
+            <Button size="sm" variant="outline" onClick={() => setConfiguringStages(true)}>Set up knockout</Button>
+          </div>
+        )}
         {openTies > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
             <span>{openTies === 1 ? 'A tie needs' : `${openTies} ties need`} a hand-picked order before the next stage or the placings can be settled.</span>

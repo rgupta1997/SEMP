@@ -35,13 +35,14 @@ import { Prisma as PrismaNS } from '@prisma/client';
 import {
   SETUP_STEP_KEYS, SETUP_STEPS, KnockoutSheetError, knockoutFromRows, matchFormatSchema, matchPresetByKey,
   isCricketFormat, orgIdPrefix, placeholderEmail, placeholderPhone, stepLabel, tieTemplateFor,
+  eventTemplateFor, isRankingSport,
   type EventSetupBlueprint, type ScoringFormat, type KnockoutLayout, type MatchFormat, type SetupCompetitorSpec, type SetupDrawSpec,
-  type SetupFixtureSpec, type SetupIssue, type SetupMatchSide, type SetupPlatformStep, type SetupStepKey,
+  type SetupDrawFormat, type SetupFixtureSpec, type SetupIssue, type SetupMatchSide, type SetupPlatformStep, type SetupStepKey,
   type SetupStepMode,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { equalsIgnoreCase, inIgnoreCase } from '../../shared/exact-ci.js';
-import { generateFixtures, type GeneratedFixture } from '../fixtures/domain/generators/index.js';
+import { generateFixtures, generateGroups, generateRoundRobin, generateRanking, type GeneratedFixture } from '../fixtures/domain/generators/index.js';
 import { generateManualKnockout, type ManualKnockoutFixture } from '../fixtures/domain/generators/manual-knockout.js';
 import { computeParentPosition, propagateByes } from '../fixtures/bracket.js';
 import { assignMatchNos } from '../fixtures/match-no.js';
@@ -200,9 +201,45 @@ export function buildDrawScoringFormat(
   return { format, notes };
 }
 
-/** What a draw's `format_config.scoring` is: a tie sport's template, else one detailed contest. */
-const drawScoringTemplate = (sport: string) =>
-  tieTemplateFor(sport) ?? { fixtureType: 'single', scoringMode: 'detailed' };
+/** What a draw's `format_config.scoring` is. A Rankings draw scores through the multi-
+ *  competitor event console, so it takes the sport's event template; a tie sport takes
+ *  its tie template; everything else is one detailed contest. */
+const drawScoringTemplate = (sport: string, format?: SetupDrawFormat) => {
+  if (format === 'Rankings') return eventTemplateFor(sport) ?? { fixtureType: 'single', scoringMode: 'detailed' };
+  return tieTemplateFor(sport) ?? { fixtureType: 'single', scoringMode: 'detailed' };
+};
+
+/** The workbook's Format names are compact ("Groups+Knockout"); the tournament_formats
+ *  catalogue spells them out ("Groups + Knockout"). Resolve through this so a draw never
+ *  fails apply with `unknown_format` over a space. */
+const CATALOG_FORMAT_NAME: Record<SetupDrawFormat, string> = {
+  Knockout: 'Knockout',
+  League: 'League',
+  'Groups+Knockout': 'Groups + Knockout',
+  'League+Knockout': 'League + Knockout',
+  Rankings: 'Rankings',
+};
+
+/** True for the two-stage draws whose knockout is set up (how many advance) in the
+ *  Setup console after import, not in the sheet. */
+export const isTwoStageSetupFormat = (f: SetupDrawFormat) => f === 'Groups+Knockout' || f === 'League+Knockout';
+
+/** Fixtures a draw becomes at import. Two-stage draws build ONLY their group/league
+ *  stage here (snake-split into groups; League+Knockout is one pool); the seeded
+ *  knockout is generated later from the Setup console's stage wizard, where the
+ *  organiser chooses how many advance. Rankings is one team-less event fixture. */
+export function setupGeneratedFixtures(d: SetupDrawSpec, tokens: string[]): GeneratedFixture[] {
+  const refs = tokens.map((teamId) => ({ teamId }));
+  if (d.format === 'Rankings') return generateRanking(refs, {});
+  if (d.format === 'League+Knockout') return generateRoundRobin(refs, {});
+  if (d.format === 'Groups+Knockout') {
+    // Provisional split until the organiser sets groups+advancers in the console: 2
+    // groups when there are enough for 2 per group, else a single pool.
+    const numGroups = tokens.length >= 4 ? 2 : 1;
+    return numGroups === 1 ? generateRoundRobin(refs, {}) : generateGroups(refs, { numGroups });
+  }
+  return generatedFixturesOf(d.format, tokens, d.thirdPlace);
+}
 
 export type ContactKind = 'real mobile' | 'real email' | 'placeholder';
 export interface CredentialRow {
@@ -347,7 +384,10 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
   ]);
   const kept = (key: string) => { const id = manifest.keys[key]; return id && live.has(id) ? id : null; };
   const roleIds = new Map(roles.flatMap((r) => (r.code ? [[r.code, r.id] as const] : [])));
-  const formatByName = new Map(formats.map((f) => [lc(f.name), f.id]));
+  // Keyed space-insensitive so the sheet's "Groups+Knockout" matches the catalogue's
+  // "Groups + Knockout". See CATALOG_FORMAT_NAME.
+  const spaceKey = (s: string | null | undefined) => lc(s).replace(/\s+/g, '');
+  const formatByName = new Map(formats.map((f) => [spaceKey(f.name), f.id]));
   const sportByName = new Map(sports.map((s) => [lc(s.name), s.id]));
   const userByEmail = new Map(emailUsers.map((u) => [u.email, u.id]));
   const byPhoneAndName = (phone: string | undefined, name: string) => {
@@ -601,8 +641,8 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
     if (!sportId) issue('error', 'unknown_sport', `Sport "${d.sport}" is not in the Sportagon catalogue`, 'draws');
     const discs = disciplines.filter((x) => x.sport_id === sportId && lc(x.name) === lc(d.discipline));
     const disciplineId = (discs.find((x) => x.championship_id) ?? discs[0])?.id ?? null;
-    const formatId = formatByName.get(lc(d.format)) ?? null;
-    if (!formatId) issue('error', 'unknown_format', `Format "${d.format}" is not in the tournament formats catalogue`, 'draws');
+    const formatId = formatByName.get(spaceKey(CATALOG_FORMAT_NAME[d.format] ?? d.format)) ?? null;
+    if (!formatId) issue('error', 'unknown_format', `Format "${CATALOG_FORMAT_NAME[d.format] ?? d.format}" is not in the tournament formats catalogue. Ask the Sportagon team to add it.`, 'draws');
     let scoring: MatchFormat | null = null;
     let scoringFormatId: string | null = null;
     if (d.scoring) {
@@ -690,7 +730,7 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
         steps.fixtures.notes.push(`${label}: ${realCount} matches + ${gen.length - realCount} byes, ${layout.rounds} rounds (${2 ** layout.rounds}-slot bracket)`);
       } else {
         const tokens = bp.squads.filter((s) => s.drawKey === f.drawKey).map((s) => s.key);
-        const gen = generatedFixturesOf(d.format, tokens, d.thirdPlace);
+        const gen = setupGeneratedFixtures(d, tokens);
         planned = gen.length;
         const byes = gen.filter((g) => g.status === 'bye').length;
         steps.fixtures.notes.push(`${label}: ${d.format} generated over ${tokens.length} squads - ${gen.length - byes} matches${byes ? ` + ${byes} byes` : ''}, no times or grounds`);
@@ -1226,11 +1266,15 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       tsBySport.set(r.sportId, tsId);
     }
     const drawId = randomUUID();
+    const isRanking = d.format === 'Rankings';
     await prisma.tournament_disciplines.create({
       data: {
         id: drawId, tournament_sport_id: tsId, discipline_id: disciplineId, format_id: r.formatId,
-        venue_id: venueId, status: 'upcoming', display_order: drawIdOf.size, squad_min: d.squadMin, squad_max: d.squadMax,
-        format_config: { thirdPlaceMatch: d.thirdPlace, scoring: drawScoringTemplate(d.sport) } as object,
+        venue_id: venueId, status: 'upcoming', display_order: drawIdOf.size,
+        // Rankings is individual (no squads, no min/max); its athletes are added in the console.
+        entry_type: isRanking ? 'individual' : 'team',
+        squad_min: isRanking ? null : d.squadMin, squad_max: isRanking ? null : d.squadMax,
+        format_config: { thirdPlaceMatch: d.thirdPlace, scoring: drawScoringTemplate(d.sport, d.format) } as object,
         scoring_format_id: formatId ?? null,
       },
     });
@@ -1260,7 +1304,11 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       })
       : []).map((x) => `${x.organization_id}|${x.user_id}`));
     let removedLeftOut = 0;
+    // Rankings draws are individual: athletes are entered in the scoring console, not as
+    // squads, so any Squads row pointing at one is skipped (no team / entry / members).
+    const drawFormatOf = new Map(bp.draws.map((d) => [d.key, d.format]));
     for (const s of bp.squads) {
+      if (drawFormatOf.get(s.drawKey) === 'Rankings') continue;
       const comp = competitorOf.get(s.competitorKey)!;
       const cid = competitorIdOf.get(s.competitorKey);
       const sportId = sportIdOf.get(s.drawKey);
@@ -1375,7 +1423,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       rFix.notes.push(`${label}: ${f.rows.length} matches + ${gen.length - realCount} byes, ${layout.rounds} rounds (${2 ** layout.rounds}-slot bracket)`);
     } else {
       const squads = bp.squads.filter((s) => s.drawKey === f.drawKey);
-      const gen = generatedFixturesOf(draw.format, squads.map((s) => s.key), draw.thirdPlace);
+      const gen = setupGeneratedFixtures(draw, squads.map((s) => s.key));
       rows = gen.map((g) => ({
         id: randomUUID(), tournament_discipline_id: drawId,
         home_team_id: team(g.homeTeamId), away_team_id: team(g.awayTeamId), winner_team_id: team(g.winnerTeamId),
@@ -1448,6 +1496,9 @@ export async function verifyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, s
     if (f.kind === 'generate') {
       checked += rows.length;
       if (!rows.length) { failures.push(`${f.drawKey}: no fixtures`); continue; }
+      // A Rankings draw is one team-less Event fixture, with its athletes added later in
+      // the console - there are no squads to be "drawn", so only check the fixture exists.
+      if (bp.draws.find((x) => x.key === f.drawKey)?.format === 'Rankings') continue;
       const drawn = new Set(rows.flatMap((r) => [r.home_team_id, r.away_team_id, r.winner_team_id]));
       for (const s of bp.squads.filter((x) => x.drawKey === f.drawKey)) {
         if (!drawn.has(m.keys[`team:${s.key}`])) failures.push(`${s.name} is not drawn in any fixture`);
