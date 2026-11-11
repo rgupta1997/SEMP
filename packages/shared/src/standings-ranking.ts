@@ -166,8 +166,8 @@ export const tieResolutionInputSchema = z.object({
   stage: z.number().int().min(1).default(1),
   pool: z.number().int().min(1).nullable().default(null),
   /** Contingent keys of the tied teams, best first. */
-  order: z.array(z.string().min(1)).min(2).max(32),
-  reason: z.string().trim().min(3).max(300),
+  order: z.array(z.string().min(1)).min(2, 'Add the tied teams and put them in order first.').max(32),
+  reason: z.string().trim().min(3, 'Say how the tie was decided (a few words).').max(300),
 });
 export type TieResolutionInput = z.infer<typeof tieResolutionInputSchema>;
 
