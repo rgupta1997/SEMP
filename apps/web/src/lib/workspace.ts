@@ -266,6 +266,38 @@ export interface WorkspaceContext {
   theme?: { brand?: string | null; logo_url?: string | null };
 }
 
+/** One event role row from the auth context (user_championship_roles). */
+export interface ChampionshipRoleRow {
+  championship_id: string;
+  championship?: { name?: string | null; status?: string | null; archived_at?: string | null } | null;
+  role?: { code?: string | null } | null;
+}
+
+/**
+ * One context per event, carrying every role held in it. One context per ROW gave
+ * a POC + Organiser two contexts with one id, and the first (newest role) won the sidebar.
+ */
+export function eventContextsFromRoles(rows: ChampionshipRoleRow[]): WorkspaceContext[] {
+  const byId = new Map<string, WorkspaceContext>();
+  for (const r of rows) {
+    const existing = byId.get(r.championship_id);
+    const code = r.role?.code;
+    if (existing) {
+      if (code && !existing.roleCodes.includes(code)) existing.roleCodes.push(code);
+      continue;
+    }
+    byId.set(r.championship_id, {
+      id: r.championship_id,
+      kind: r.championship?.status === 'draft' ? 'eventDraft' : 'event',
+      name: r.championship?.name ?? 'Event',
+      roleCodes: code ? [code] : [],
+      sub: r.championship?.status ?? undefined,
+      archived: !!r.championship?.archived_at,
+    });
+  }
+  return [...byId.values()];
+}
+
 /**
  * Resolve the nav for one context. Three filters, in order, and the order matters:
  * role filtering happens on the context's own list, and the capability gate is last

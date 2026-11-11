@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CapabilityKey } from '@semp/entitlements';
-import { EVENT_VIEW, NAV, ROLE_NAV, hrefFor, landingFor, resolveNav, type WorkspaceContext } from './workspace';
+import { EVENT_VIEW, NAV, ROLE_NAV, eventContextsFromRoles, hrefFor, landingFor, resolveNav, type WorkspaceContext } from './workspace';
 
 // Every person-level fact on, so a test about ROLES is not also a test about facts.
 const OFFICIATES = { officiates: true };
@@ -24,6 +24,23 @@ const ctx = (over: Partial<WorkspaceContext>): WorkspaceContext => ({
 const NONE = new Set<CapabilityKey>();
 const ALL = new Set<CapabilityKey>(['advanced_reports', 'multi_campus', 'audit_logs'] as CapabilityKey[]);
 const keys = (items: Array<{ key: string }>) => items.map((i) => i.key);
+
+describe('eventContextsFromRoles', () => {
+  const row = (code: string, id = 'e1') => ({ championship_id: id, championship: { name: 'Meet', status: 'registration_open' }, role: { code } });
+
+  it('gives one context per event, carrying every role held in it', () => {
+    const out = eventContextsFromRoles([row('poc'), row('organiser'), row('captain', 'e2')]);
+    expect(out.map((c) => [c.id, c.roleCodes])).toEqual([['e1', ['poc', 'organiser']], ['e2', ['captain']]]);
+  });
+
+  it('an organiser who is also POC gets the full organiser nav, whichever role came first', () => {
+    const full = keys(resolveNav(ctx({ id: 'e1', kind: 'event', roleCodes: ['organiser'] }), NONE));
+    for (const rows of [[row('poc'), row('organiser')], [row('organiser'), row('poc')]]) {
+      const [event] = eventContextsFromRoles(rows);
+      expect(keys(resolveNav(event, NONE))).toEqual(full);
+    }
+  });
+});
 
 describe('resolveNav · role filter', () => {
   it('gives an unfiltered role the whole context', () => {
