@@ -5,7 +5,7 @@ import {
   type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal,
   type StandingsPlacement,
 } from '@semp/shared';
-import { isCalledDraw, relayCredits, withExtraSubEvents } from '@semp/shared';
+import { disciplineResultType, isCalledDraw, mixesSubEvents, relayCredits, subEventScopeOf, withExtraSubEvents } from '@semp/shared';
 import { inPlacingStage, placingStagesOf } from '../fixtures/domain/stage-tree.js';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
@@ -86,6 +86,8 @@ export interface DerivableFixture {
   discipline_name: string | null;
   /** individual | doubles | team - decides singles vs doubles for a racquet match. */
   discipline_entry_type?: string | null;
+  /** disciplines.result_type - how a named discipline ranks when its name matches no template race. */
+  discipline_result_type?: string | null;
   /** `tournament_disciplines.format_config` - carries the EventSpec for a ranking event. */
   format_config: unknown;
   /** `fixtures.live_state` - carries ranking-event competitors and their marks. */
@@ -214,13 +216,17 @@ function eventStateOf(liveState: unknown): EventState | null {
  * disagree. Returns competitor-row ids; the caller maps them to accounts.
  */
 function eventRanksOf(
-  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name' | 'discipline_result_type'>,
 ): Array<{ competitor_id: string; rank: number; sub_event: string }> {
   const raw = eventSpecOf(fx.format_config, fx.sport_name);
   const state = eventStateOf(fx.live_state);
   if (!raw || !state || state.participants.length === 0) return [];
-  const named = effectiveEventSpec(raw, { id: fx.discipline_id, name: fx.discipline_name });
-  const spec = fx.discipline_id ? named : withExtraSubEvents(named, state);
+  const discipline = {
+    id: fx.discipline_id, name: fx.discipline_name, scope: subEventScopeOf(fx.format_config),
+    resultType: disciplineResultType(null, fx.discipline_name ?? '', fx.discipline_result_type),
+  };
+  const named = effectiveEventSpec(raw, discipline);
+  const spec = mixesSubEvents(discipline) ? withExtraSubEvents(named, state) : named;
   // 'sumBest' totals marks into a team score - there is no per-athlete placing to
   // award a medal from. `detailedContributions` skips medals for the same reason.
   if (spec.result.aggregate === 'sumBest') return [];
@@ -240,7 +246,7 @@ function eventRanksOf(
 }
 
 export function eventMedals(
-  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name' | 'discipline_result_type'>,
 ): Array<{ competitor_id: string; medal: Medal; sub_event: string }> {
   const out: Array<{ competitor_id: string; medal: Medal; sub_event: string }> = [];
   for (const r of eventRanksOf(fx)) {
@@ -259,7 +265,7 @@ const PLACEMENT_CHIP_LIMIT = 8;
  * just with no fixed vocabulary for "5th" the way `StandingsPlacement` has.
  */
 export function eventPlacements(
-  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name' | 'discipline_result_type'>,
 ): Array<{ competitor_id: string; rank: number; sub_event: string }> {
   return eventRanksOf(fx).filter((r) => !MEDAL_BY_RANK[r.rank] && r.rank <= PLACEMENT_CHIP_LIMIT);
 }

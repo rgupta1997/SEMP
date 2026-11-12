@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, chosenEvents, toggleRace as toggleRaceState, withRelayRows, lineupOf, raceField, setInLineup, setRelayMembers, relayLegs, rankSubEvent, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, withExtraSubEvents, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, disciplineResultType, effectiveEventSpec, mixesSubEvents, subEventScopeOf, withExtraSubEvents, type ExtraSubEvent, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
 import { POWERLIFTING_LIFTS, liftsOf, liftsTotal, withLift, type LiftKey } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
@@ -527,11 +527,15 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     [tieSpec, sportName],
   );
   const rawEventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
-  // null discipline_id = "Whole sport", the only shape that mixes categories -
-  // a named discipline ("66kg") collapses to just that one.
+  // Whole sport, or a named discipline set to run several races, mixes categories;
+  // a plain named discipline ("66kg") collapses to just that one.
   const disciplineId: string | null = fixture?.tournament_disciplines?.discipline_id ?? null;
   const disciplineName: string | null = fixture?.tournament_disciplines?.disciplines?.name ?? null;
-  const eventSpec = rawEventSpec ? effectiveEventSpec(rawEventSpec, { id: disciplineId, name: disciplineName }) : undefined;
+  const subEventScope = subEventScopeOf(fixture?.tournament_disciplines?.format_config);
+  const disciplineResult = disciplineResultType(null, disciplineName ?? '', fixture?.tournament_disciplines?.disciplines?.result_type);
+  const eventSpec = rawEventSpec
+    ? effectiveEventSpec(rawEventSpec, { id: disciplineId, name: disciplineName, scope: subEventScope, resultType: disciplineResult })
+    : undefined;
 
   // Ranking/event sports (powerlifting/swimming/athletics) have no head-to-head match,
   // so they're event-only - the "Single match" structure doesn't apply and is omitted.
@@ -3323,7 +3327,10 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   // A named discipline ("66kg") already fixes the one category every entrant is
   // in (effectiveEventSpec narrowed spec.subEvents to just it) - nothing left to
   // pick. Only "Whole sport" still mixes more than one category.
-  const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
+  const isNamedDiscipline = !mixesSubEvents({
+    id: fixture?.tournament_disciplines?.discipline_id ?? null, name: null,
+    scope: subEventScopeOf(fixture?.tournament_disciplines?.format_config),
+  });
   const fixedCategory = isNamedDiscipline ? baseSpec.subEvents[0]?.key ?? null : null;
 
   // Whoever's org has a team_entries row for this discipline has one registered
@@ -3369,11 +3376,13 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   // The template's classes/races plus any this match added from the event's own disciplines.
   const spec = useMemo(() => withExtraSubEvents(baseSpec, state), [baseSpec, state.extraEvents]); // eslint-disable-line react-hooks/exhaustive-deps
   // Named disciplines set up under this sport (Setup > Sports & disciplines), not already built in.
-  const extraChoices: Array<{ key: string; label: string }> = useMemo(() => {
+  const extraChoices: ExtraSubEvent[] = useMemo(() => {
     const builtIn = new Set(baseSpec.subEvents.map((se) => se.label.trim().toLowerCase()));
     return ((fixture as any)?.event_disciplines ?? [])
       .filter((d: { key?: unknown; label?: unknown }) => typeof d?.key === 'string' && typeof d?.label === 'string' && !builtIn.has((d.label as string).trim().toLowerCase()));
   }, [fixture, baseSpec]);
+  // One class or race on screen: a plain named discipline, or a sport with a single one and nothing to add.
+  const oneCategoryView = isNamedDiscipline || (spec.subEvents.length < 2 && extraChoices.length === 0);
   // Armed by the first mark an official types, never by the seeding above - see the
   // matching comment in EventRankingConsole.
   const [touched, setTouched] = useState(false);
@@ -3567,11 +3576,11 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
       return;
     }
     // Tabs view: every class on screen. One-class view: the class shown.
-    const shown = isNamedDiscipline || spec.subEvents.length < 2 ? (category ? [category] : []) : chosenEvents(state, keys);
+    const shown = oneCategoryView ? (category ? [category] : []) : chosenEvents(state, keys);
     const gaps = shown.map((key) => {
       const relayKey = isRelaySubEvent(spec.subEvents.find((se) => se.key === key));
       const ids = new Set(lineupOf(state, key, relayKey, pickOne));
-      const rows = isNamedDiscipline || spec.subEvents.length < 2 ? state.participants : raceField(state, relayKey).filter((p) => ids.has(p.id));
+      const rows = oneCategoryView ? state.participants : raceField(state, relayKey).filter((p) => ids.has(p.id));
       return { label: spec.subEvents.find((se) => se.key === key)?.label ?? noun, done: rows.filter((p) => finished(p, key)).length, total: rows.length };
     }).filter((g) => g.done < g.total);
     if (gaps.length && !(await confirmDialog({
@@ -3631,7 +3640,7 @@ function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
               subtitle above, not repeated on every single row. A genuinely
               multi-category "Whole sport" grid sport is the only shape that still
               needs its own column per race. */}
-          {state.participants.length > 0 && (isNamedDiscipline || spec.subEvents.length < 2 ? (
+          {state.participants.length > 0 && (oneCategoryView ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">

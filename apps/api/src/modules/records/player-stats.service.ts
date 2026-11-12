@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { POWERLIFTING_LIFTS, isCalledDraw, matchJerseys, relayCredits, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
+import { POWERLIFTING_LIFTS, disciplineResultType, isCalledDraw, matchJerseys, mixesSubEvents, relayCredits, subEventScopeOf, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -50,7 +50,7 @@ interface StatFixture {
     round_formats?: unknown;
     format_config?: unknown;
     discipline_id?: string | null;
-    disciplines?: { name: string; entry_type?: string | null } | null;
+    disciplines?: { name: string; entry_type?: string | null; result_type?: string | null } | null;
     tournament_sports: { sport_id: string; sports: { name: string } | null } | null;
   } | null;
 }
@@ -99,7 +99,7 @@ export async function buildPlayerStatRows(
       tournament_disciplines: {
         select: {
           format_config: true, discipline_id: true,
-          disciplines: { select: { name: true, entry_type: true } },
+          disciplines: { select: { name: true, entry_type: true, result_type: true } },
           tournament_sports: { select: { sport_id: true, sports: { select: { name: true } } } },
         },
       },
@@ -139,14 +139,15 @@ export async function buildPlayerStatRows(
     // else the sport's seeded one, narrowed to the discipline's own category.
     const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
     const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
-    const namedSpec = rawSpec
-      ? effectiveEventSpec(rawSpec, {
-        id: fx.tournament_disciplines?.discipline_id ?? null,
-        name: fx.tournament_disciplines?.disciplines?.name ?? null,
-      })
-      : null;
+    const discipline = {
+      id: fx.tournament_disciplines?.discipline_id ?? null,
+      name: fx.tournament_disciplines?.disciplines?.name ?? null,
+      scope: subEventScopeOf(fx.tournament_disciplines?.format_config),
+      resultType: disciplineResultType(null, fx.tournament_disciplines?.disciplines?.name ?? '', fx.tournament_disciplines?.disciplines?.result_type),
+    };
+    const namedSpec = rawSpec ? effectiveEventSpec(rawSpec, discipline) : null;
     // Classes added from the event's own disciplines rank like the template's.
-    const spec = namedSpec && !fx.tournament_disciplines?.discipline_id ? withExtraSubEvents(namedSpec, storedEvent) : namedSpec;
+    const spec = namedSpec && mixesSubEvents(discipline) ? withExtraSubEvents(namedSpec, storedEvent) : namedSpec;
     const rankCache = new Map<string, Map<string, number>>();
     const rankOf = (competitorId: string | null, category: string | null): number | null => {
       if (!spec || !competitorId || !category) return null;

@@ -111,6 +111,11 @@ describe('choosing which races to run', async () => {
     expect(hydrateEvent({ participants: [], events: ['m25free', 7] }).events).toEqual(['m25free']);
     expect(hydrateEvent({ participants: [] }).events).toBeUndefined();
   });
+
+  it('keeps races added from setup through a reload, so the next save does not wipe them', () => {
+    const back = hydrateEvent({ participants: [], extraEvents: [{ key: 'jav', label: 'Javelin', resultType: 'distance' }, { key: 1, label: 'bad' }] });
+    expect(back.extraEvents).toEqual([{ key: 'jav', label: 'Javelin', resultType: 'distance' }]);
+  });
 });
 
 describe('who is in each race, and relays', async () => {

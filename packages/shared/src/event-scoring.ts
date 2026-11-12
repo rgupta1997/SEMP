@@ -2,7 +2,7 @@
 // categories, athletics). Shared by the web console and the API standings service so
 // both compute org points + medals identically. No DOM / Prisma deps - pure functions.
 
-import type { EventSpec } from './scoring.js';
+import type { EventSpec, SubEventSpec } from './scoring.js';
 
 export interface ParticipantResult {
   id: string;                            // local row id
@@ -84,14 +84,74 @@ export interface EventState {
   /** Per relay sub-event, per institute relay row, the swimmers who swam it. */
   relayMembers?: Record<string, Record<string, string[]>>;
   /** Sub-events added from the event's own disciplines (key = discipline id), beyond the template. */
-  extraEvents?: Array<{ key: string; label: string }>;
+  extraEvents?: Array<ExtraSubEvent>;
 }
 
-export interface DisciplineRef { id: string | null; name: string | null }
+/** A race added from a discipline, with how it is ranked when the discipline says. */
+export interface ExtraSubEvent { key: string; label: string; resultType?: DisciplineResultType }
+
+// A discipline's gender (disciplines.gender). Null = generic, offered to every gender.
+export const DISCIPLINE_GENDERS = ['men', 'women', 'mixed'] as const;
+export type DisciplineGender = (typeof DISCIPLINE_GENDERS)[number];
+export const DISCIPLINE_GENDER_LABEL: Record<DisciplineGender, string> = { men: 'Men', women: 'Women', mixed: 'Mixed' };
+
+/** A catalogue row standing for the whole sport, never a race of its own. */
+export const WHOLE_SPORT_DISCIPLINE_NAME = 'Whole sport';
+export const isWholeSportName = (name: string) => name.trim().toLowerCase() === WHOLE_SPORT_DISCIPLINE_NAME.toLowerCase();
+
+/** Is a discipline offered inside a multi-race discipline of this gender? Generic fits every one. */
+export function offeredToGender(container: DisciplineGender | null | undefined, discipline: DisciplineGender | null | undefined): boolean {
+  return !container || !discipline || discipline === container;
+}
+
+// How a discipline is ranked (disciplines.result_type). Null = the template's match by name, else the sport's default.
+export const DISCIPLINE_RESULT_TYPES = ['time', 'distance', 'weight'] as const;
+export type DisciplineResultType = (typeof DISCIPLINE_RESULT_TYPES)[number];
+export const DISCIPLINE_RESULT_TYPE_LABEL: Record<DisciplineResultType, string> = {
+  time: 'Time (lowest wins)', distance: 'Distance (highest wins)', weight: 'Weight (highest wins)',
+};
+const RESULT_META: Record<DisciplineResultType, { winnerIs: 'min' | 'max'; unit: NonNullable<SubEventSpec['unit']> }> = {
+  time: { winnerIs: 'min', unit: 's' }, distance: { winnerIs: 'max', unit: 'm' }, weight: { winnerIs: 'max', unit: 'kg' },
+};
+const resultFields = (rt?: DisciplineResultType | null) =>
+  (rt && RESULT_META[rt] ? { resultType: rt, winnerIs: RESULT_META[rt].winnerIs, unit: RESULT_META[rt].unit } : {});
+
+// Which sub-events a named discipline runs: just its own (default), or every race the event's
+// disciplines offer for its gender, picked in the console like Whole sport. format_config.subEventScope.
+export const SUB_EVENT_SCOPES = ['one', 'all'] as const;
+export type SubEventScope = (typeof SUB_EVENT_SCOPES)[number];
+export const SUB_EVENT_SCOPE_KEY = 'subEventScope';
+
+/** The scope saved on a draw's format_config; 'one' when unset or unknown. */
+export function subEventScopeOf(formatConfig: unknown): SubEventScope {
+  const v = (formatConfig as Record<string, unknown> | null | undefined)?.[SUB_EVENT_SCOPE_KEY];
+  return SUB_EVENT_SCOPES.includes(v as SubEventScope) ? (v as SubEventScope) : 'one';
+}
+
+export interface DisciplineRef {
+  id: string | null; name: string | null; scope?: SubEventScope;
+  /** The discipline's own result type; wins over the template's match by name. */
+  resultType?: DisciplineResultType | null;
+}
+
+/** True when the console shows a list of sub-events (whole sport, or a multi-race discipline). */
+export function mixesSubEvents(discipline: DisciplineRef): boolean {
+  return !discipline.id || (!!discipline.scope && discipline.scope !== 'one');
+}
 
 // "Men's 400m" -> "400m": strips the gender/mixed prefix a discipline's own short
 // name never carries, so "400m" still finds the template sub-event it came from.
 const normalizeLabel = (s: string): string => s.trim().toLowerCase().replace(/^(men's|women's|mixed)\s+/, '');
+
+/**
+ * How a discipline is ranked: its stored type, else its template namesake's ("Long Jump" ->
+ * distance), else undefined (the sport's default). Used for races offered from disciplines.
+ */
+export function disciplineResultType(template: EventSpec | null | undefined, name: string, stored?: string | null): DisciplineResultType | undefined {
+  if (stored && (DISCIPLINE_RESULT_TYPES as readonly string[]).includes(stored)) return stored as DisciplineResultType;
+  const rt = template?.subEvents.find((se) => normalizeLabel(se.label) === normalizeLabel(name))?.resultType;
+  return rt && (DISCIPLINE_RESULT_TYPES as readonly string[]).includes(rt) ? (rt as DisciplineResultType) : undefined;
+}
 
 // A "Whole sport" discipline (id null) genuinely mixes categories - that's what
 // pickOne's picker, or a grid sport's per-race columns, are FOR. A NAMED
@@ -108,6 +168,8 @@ const normalizeLabel = (s: string): string => s.trim().toLowerCase().replace(/^(
 // backwards.
 export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): EventSpec {
   if (!discipline.id) return spec;
+  // Every race comes from the event's disciplines, added in the console (withExtraSubEvents).
+  if (discipline.scope === 'all') return { ...spec, subEvents: [] };
   const label = discipline.name ?? spec.subEventNoun ?? 'Category';
   const original = discipline.name
     ? spec.subEvents.find((se) => normalizeLabel(se.label) === normalizeLabel(discipline.name!))
@@ -121,6 +183,7 @@ export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): 
       ...(original?.resultType ? { resultType: original.resultType } : {}),
       ...(original?.winnerIs ? { winnerIs: original.winnerIs } : {}),
       ...(original?.unit ? { unit: original.unit } : {}),
+      ...resultFields(discipline.resultType),
       ...(kind ? { kind } : {}),
     }],
   };
@@ -326,6 +389,10 @@ export function withExtraSubEvents(spec: EventSpec, state: Pick<EventState, 'ext
   const have = new Set(spec.subEvents.map((se) => se.key));
   const extra = (state?.extraEvents ?? [])
     .filter((e) => e && typeof e.key === 'string' && typeof e.label === 'string' && !have.has(e.key) && (have.add(e.key), true))
-    .map((e) => ({ key: e.key, label: e.label, ...(/\brelay\b/i.test(e.label) ? { kind: 'relay' as const } : {}) }));
+    .map((e) => ({
+      key: e.key, label: e.label,
+      ...resultFields((DISCIPLINE_RESULT_TYPES as readonly string[]).includes(e.resultType as string) ? e.resultType : null),
+      ...(/\brelay\b/i.test(e.label) ? { kind: 'relay' as const } : {}),
+    }));
   return extra.length ? { ...spec, subEvents: [...spec.subEvents, ...extra] } : spec;
 }
