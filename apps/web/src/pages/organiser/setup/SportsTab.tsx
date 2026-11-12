@@ -3,7 +3,11 @@ import { Medal, Pencil, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS, tieLayoutsFor, type TieSpec } from '@semp/shared';
+import {
+  DISCIPLINE_GENDERS, DISCIPLINE_GENDER_LABEL, DISCIPLINE_RESULT_TYPES, DISCIPLINE_RESULT_TYPE_LABEL, ENTRY_TYPE, SUB_EVENT_SCOPES,
+  SUB_EVENT_SCOPE_KEY, TOURNAMENT_DISCIPLINE_STATUS, pluralise, subEventScopeOf, tieLayoutsFor,
+  type DisciplineGender, type DisciplineResultType, type SubEventScope, type TieSpec,
+} from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../../features/scoring/TieLayoutEditor';
 import { usePermissions } from '../../../lib/permissions';
 import { isPoolShapedFormat, titleCase } from '../../../lib/format';
@@ -16,6 +20,37 @@ import { StageConfigWizard } from '../../../components/StageConfigWizard';
 // check the scoring console uses to default these sports to the event console.
 const isRankingFormat = (name?: string | null) => !!name && name.trim().toLowerCase().includes('rank');
 const isRankingSport = (sportName?: string | null) => !!eventTemplateFor(sportName);
+
+/** True when the sport's races rank differently (athletics: times and distances), so a new discipline must say which. */
+const mixesResultTypes = (sportName?: string | null) => {
+  const ev = eventTemplateFor(sportName)?.event;
+  return !!ev && new Set(ev.subEvents.map((se) => se.resultType ?? ev.result.resultType)).size > 1;
+};
+
+/** The sport's own word for a race: "Race", "Weight category", "Event". */
+const subEventNounOf = (sportName?: string | null) => eventTemplateFor(sportName)?.event?.subEventNoun ?? 'Race';
+const scopeHint = (noun: string) =>
+  `"All" lets the scorer pick ${pluralise(noun.toLowerCase())} in one console, from this sport's generic disciplines plus the ones of this discipline's gender.`;
+
+/** One race, or every race the event offers for its gender (ranking sports only). */
+function SubEventScopeSelect({ value, onChange, sportName, label, hint }:
+  { value: SubEventScope; onChange: (v: SubEventScope) => void; sportName?: string | null; label?: string; hint?: string }) {
+  const noun = subEventNounOf(sportName).toLowerCase();
+  const names: Record<SubEventScope, string> = { one: `Just this ${noun}`, all: `All ${pluralise(noun)} (like Whole sport)` };
+  return (
+    <Field label={label ?? `${titleCase(pluralise(noun))} in this discipline`} hint={hint ?? scopeHint(noun)}>
+      <Select value={value} onChange={(e) => onChange(e.target.value as SubEventScope)} data-qa="sub-event-scope">
+        {SUB_EVENT_SCOPES.map((s) => <option key={s} value={s}>{names[s]}</option>)}
+      </Select>
+    </Field>
+  );
+}
+
+/** format_config with the scope set (or removed for 'one'), every other key kept. */
+const withScope = (config: unknown, scope: SubEventScope): Record<string, unknown> => {
+  const { [SUB_EVENT_SCOPE_KEY]: _old, ...rest } = (config ?? {}) as Record<string, unknown>;
+  return scope === 'one' ? rest : { ...rest, [SUB_EVENT_SCOPE_KEY]: scope };
+};
 
 /* ----------------------------- Add sports modal ----------------------------- */
 // Tap sport tiles to select several at once; choose a fixture format for each,
@@ -245,11 +280,18 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   // is only ever shown to the organiser. The new discipline is added to this sport's
   // catalogue and auto-selected so it can be added in the same action.
   const [creatingDisc, setCreatingDisc] = useState(false);
+  // Per selected named discipline, so "Men" and "Women" can each take their own setting.
+  const [scopes, setScopes] = useState<Record<string, SubEventScope>>({});
   const [dName, setDName] = useState('');
   const [dEntry, setDEntry] = useState('team');
   const [dMin, setDMin] = useState('1');
   const [dMax, setDMax] = useState('15');
   const dSquadFixed = SQUAD_BY_ENTRY[dEntry]?.fixed ?? false;
+  // Gender ('' = generic) and, where the sport mixes times and distances, how it ranks.
+  const [dGender, setDGender] = useState<DisciplineGender | ''>('');
+  const [dResult, setDResult] = useState<DisciplineResultType | ''>('');
+  const ranking = isRankingSport(sportName);
+  const asksResult = ranking && mixesResultTypes(sportName);
   // Selecting an entry type resets the squad to that type's natural size.
   const onDEntryChange = (v: string) => {
     setDEntry(v);
@@ -260,14 +302,20 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   const addNewDiscipline = async () => {
     setError(null);
     if (!dName.trim()) { setError('Discipline name required'); return; }
+    if (asksResult && !dResult) { setError('Choose how this discipline is ranked: time or distance'); return; }
     const min = Number(dMin), max = Number(dMax);
     if (min > max) { setError('Squad min cannot exceed max'); return; }
     try {
       // Belongs to this event only: other organisers never see it in their list.
-      const d: any = await createDiscipline.mutateAsync({ sport_id: tournamentSport.sport_id, championship_id: eventId, name: dName.trim(), entry_type: dEntry, squad_min: min, squad_max: max });
+      const d: any = await createDiscipline.mutateAsync({
+        sport_id: tournamentSport.sport_id, championship_id: eventId, name: dName.trim(), entry_type: dEntry, squad_min: min, squad_max: max,
+        gender: dGender || null, result_type: asksResult ? dResult : null,
+      });
       await qc.invalidateQueries({ queryKey: [disciplinesPath] });
       setSelected((s) => new Set(s).add(d.id));
-      setCreatingDisc(false); setDName(''); setDEntry('team'); setDMin('1'); setDMax('15');
+      // A discipline made here usually groups races ("Men"), so it starts on "all".
+      if (ranking) setScopes((s) => ({ ...s, [d.id]: 'all' }));
+      setCreatingDisc(false); setDName(''); setDEntry('team'); setDMin('1'); setDMax('15'); setDGender(''); setDResult('');
     } catch (e: any) { setError(e.message ?? 'Could not create discipline'); }
   };
 
@@ -278,6 +326,7 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const ids = [...selected];
   const wholeSelected = selected.has(WHOLE);
+  const scopeIds = ranking ? ids.filter((id) => id !== WHOLE) : [];
 
   const submit = async () => {
     setError(null);
@@ -287,7 +336,14 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
       const base = { tournament_sport_id: tournamentSport.id, venue_id: venueId || null, format_id: formatId || null };
       const body = id === WHOLE
         ? { ...base, discipline_id: null, entry_type: wholeEntry, squad_min: Number(wholeMin), squad_max: Number(wholeMax) }
-        : (() => { const d = disciplines.find((x) => x.id === id); return { ...base, discipline_id: id, entry_type: d?.entry_type ?? 'team', squad_min: d?.squad_min ?? 1, squad_max: d?.squad_max ?? 15 }; })();
+        : (() => {
+          const d = disciplines.find((x) => x.id === id);
+          const scope = scopeIds.includes(id) ? scopes[id] ?? 'one' : 'one';
+          return {
+            ...base, discipline_id: id, entry_type: d?.entry_type ?? 'team', squad_min: d?.squad_min ?? 1, squad_max: d?.squad_max ?? 15,
+            ...(scope !== 'one' ? { format_config: withScope({}, scope) } : {}),
+          };
+        })();
       return { id, label: labelFor(id), body };
     });
 
@@ -349,7 +405,7 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
         <Tile id={WHOLE} title="Whole sport" subtitle="no sub-discipline" />
         {!disciplinesLoading && disciplines.map((d) => (
           <Tile key={d.id} id={d.id} title={d.name}
-            subtitle={`${d.entry_type ?? 'team'} · squad ${d.squad_min ?? 1}–${d.squad_max ?? 15}${d.championship_id ? ' · this event only' : ''}`} />
+            subtitle={`${d.entry_type ?? 'team'} · squad ${d.squad_min ?? 1}–${d.squad_max ?? 15}${d.gender ? ` · ${DISCIPLINE_GENDER_LABEL[d.gender as DisciplineGender] ?? d.gender}` : ''}${d.championship_id ? ' · this event only' : ''}`} />
         ))}
       </div>
       {disciplinesLoading ? (
@@ -385,6 +441,26 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
             </label>
             <Button variant="outline" onClick={addNewDiscipline} disabled={createDiscipline.isPending}>{createDiscipline.isPending ? 'Adding…' : 'Create'}</Button>
           </div>
+          {ranking && (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Gender</span>
+                <Select value={dGender} onChange={(e) => setDGender(e.target.value as DisciplineGender | '')} className="w-full" data-qa="new-discipline-gender">
+                  <option value="">Generic (any)</option>
+                  {DISCIPLINE_GENDERS.map((g) => <option key={g} value={g}>{DISCIPLINE_GENDER_LABEL[g]}</option>)}
+                </Select>
+              </label>
+              {asksResult && (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Ranked by</span>
+                  <Select value={dResult} onChange={(e) => setDResult(e.target.value as DisciplineResultType | '')} className="w-full" data-qa="new-discipline-result">
+                    <option value="">Choose…</option>
+                    {DISCIPLINE_RESULT_TYPES.filter((t) => t !== 'weight').map((t) => <option key={t} value={t}>{DISCIPLINE_RESULT_TYPE_LABEL[t]}</option>)}
+                  </Select>
+                </label>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <button type="button" onClick={() => setCreatingDisc(true)} className="mt-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-300">+ Create a new discipline</button>
@@ -407,6 +483,14 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
               </Select>
             </Field>
           </div>
+          {scopeIds.length > 0 && (
+            <div className="grid gap-x-3 sm:grid-cols-2" data-qa="scope-list">
+              {scopeIds.map((id, i) => (
+                <SubEventScopeSelect key={id} value={scopes[id] ?? 'one'} onChange={(v) => setScopes((s) => ({ ...s, [id]: v }))}
+                  sportName={sportName} label={labelFor(id)} hint={i === 0 ? undefined : ''} />
+              ))}
+            </div>
+          )}
           {wholeSelected && (
             <div className="grid grid-cols-3 gap-x-3">
               <Field label="Whole-sport entry">
@@ -447,6 +531,10 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
   const [tieLayout, setTieLayout] = useState<TieLayoutValue | null>(null);
   const storedScoring = discipline.format_config?.scoring;
   const storedTie: TieSpec | undefined = storedScoring?.fixtureType === 'tie' ? storedScoring.tie : undefined;
+  // Only a named discipline of a ranking sport can run several races; Whole sport already does.
+  const offersScope = !!discipline.discipline_id && isRankingSport(sportName);
+  const storedScope = subEventScopeOf(discipline.format_config);
+  const [scope, setScope] = useState<SubEventScope>(storedScope);
   const offersTie = entryType === 'team' && tieLayoutsFor(sportName).length > 0;
   const sportFormatName = formats.find((f) => f.id === sportFormatId)?.name;
   const squadFixed = squadIsFixed(entryType, sportName);
@@ -487,6 +575,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
         ? rest
         : { ...rest, scoring: { fixtureType: 'tie', scoringMode: storedScoring?.scoringMode ?? 'detailed', tie: tieLayout.spec } };
     }
+    if (offersScope && scope !== storedScope) formatConfig = withScope(formatConfig ?? discipline.format_config, scope);
     update.mutate(
       {
         venue_id: venueId || null,
@@ -561,6 +650,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
         </Select>
       </Field>
+      {offersScope && <SubEventScopeSelect value={scope} onChange={setScope} sportName={sportName} />}
       {offersTie && <TieLayoutEditor sport={sportName} stored={storedTie} onChange={setTieLayout} />}
       <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
         Match structure (single / team tie / event) and scoring depth (live vs final score) are chosen by the official on the match console.

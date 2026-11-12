@@ -14,6 +14,7 @@ import { ENTRY_LEVELS } from './org-structure.js';
 import { HOST_CITIES_MAX } from './host-cities.js';
 import { groupRankingSchema } from './standings-ranking.js';
 import { isRankingSport } from './event-templates.js';
+import { DISCIPLINE_GENDERS, DISCIPLINE_RESULT_TYPES } from './event-scoring.js';
 
 const uuid = z.string().uuid();
 
@@ -344,6 +345,10 @@ export const createDisciplineSchema = z.object({
   squad_min: z.number().int().min(1).default(1),
   squad_max: z.number().int().min(1).default(15),
   display_order: z.number().int().default(0),
+  /** men | women | mixed; null = generic. */
+  gender: z.enum(DISCIPLINE_GENDERS).nullable().optional(),
+  /** How it is ranked when its name matches nothing in the sport's template. */
+  result_type: z.enum(DISCIPLINE_RESULT_TYPES).nullable().optional(),
 });
 // Which event a discipline belongs to is fixed at creation - an edit cannot publish it to everyone.
 export const updateDisciplineSchema = createDisciplineSchema.omit({ championship_id: true }).partial();

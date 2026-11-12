@@ -117,6 +117,47 @@ function validateNode(node: StageNodeDraft, entrants: TokenEntrant[], label: str
 }
 
 // Serializes a draft node to the wire shape stage-config.ts expects.
+/**
+ * The saved stage tree (format_config.root) back into the form, so reconfiguring starts from
+ * the last setup instead of a blank one. Null when there is nothing usable saved.
+ */
+export function fromStageNode(node: any, sport?: string | null): StageNodeDraft | null {
+  if (node?.type === 'knockout') {
+    return {
+      type: 'knockout',
+      eliminationType: node.eliminationType === 'double' ? 'double' : 'single',
+      seeding: node.seeding === 'manual' ? 'manual' : 'auto',
+      thirdPlaceMatch: !!node.thirdPlaceMatch,
+      manualPairs: Array.isArray(node.manualPairs)
+        ? node.manualPairs.map((p: any) => ({ home: p?.home ?? null, away: p?.away ?? null }))
+        : [],
+    };
+  }
+  if (node?.type !== 'group') return null;
+  const branches: BranchDraft[] = (Array.isArray(node.branches) ? node.branches : []).flatMap((b: any) => {
+    const child = fromStageNode(b?.childStage, sport);
+    return child ? [{ id: newId(), label: b.label ?? '', rankFrom: Number(b.rankFrom) || 1, rankTo: Number(b.rankTo) || 1, childStage: child }] : [];
+  });
+  return {
+    type: 'group',
+    numGroups: Number(node.numGroups) || 2,
+    doubleRound: !!node.doubleRound,
+    tiebreakers: Array.isArray(node.tiebreakers) && node.tiebreakers.length ? node.tiebreakers : defaultGroupRanking(sport).tiebreakers,
+    points: node.points && typeof node.points === 'object' ? node.points : null,
+    branches,
+  };
+}
+
+/** Saved pool pins (slot numbers) back into team -> pool. */
+export function pinsFromAllocation(allocation: unknown, numGroups: number): Record<string, number> {
+  const pins: Record<string, number> = {};
+  if (!Array.isArray(allocation)) return pins;
+  for (const a of allocation) {
+    if (typeof a?.teamId === 'string' && Number(a?.slotIndex) >= 1) pins[a.teamId] = poolForSlot(Number(a.slotIndex), numGroups);
+  }
+  return pins;
+}
+
 function toStageNode(draft: StageNodeDraft): any {
   if (draft.type === 'group') {
     return {
@@ -310,6 +351,18 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
   // teamId -> pool (1-based). Converted to slot indexes only at submit, so the UI
   // stays one picker row however many teams/pools there are.
   const [pins, setPins] = useState<Record<string, number>>({});
+  // Reconfiguring starts from the last generated setup, not from scratch.
+  const { data: draw } = useApi<{ format_config?: { root?: unknown; manualAllocation?: unknown } }>(`/tournament-disciplines/${tournamentDisciplineId}`);
+  const [loadedSaved, setLoadedSaved] = useState(false);
+  useEffect(() => {
+    if (loadedSaved || rootEdited.current || !draw) return;
+    const saved = fromStageNode(draw.format_config?.root, sport);
+    if (saved?.type !== 'group') return;
+    rootEdited.current = true; // the sport default must not overwrite saved tie-breakers
+    setRoot(saved);
+    setPins(pinsFromAllocation(draw.format_config?.manualAllocation, Math.max(1, saved.numGroups)));
+    setLoadedSaved(true);
+  }, [draw]); // eslint-disable-line react-hooks/exhaustive-deps
   const [pickTeam, setPickTeam] = useState('');
   const [pickPool, setPickPool] = useState('');
   const [showManualAllocation, setShowManualAllocation] = useState(false);
@@ -366,6 +419,11 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
 
       {teamsLoading ? <Spinner label="Loading teams…" /> : (
         <p className="text-xs text-slate-400 dark:text-slate-500">{teams.length} team{teams.length === 1 ? '' : 's'} registered to this draw.</p>
+      )}
+      {loadedSaved && (
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300" data-qa="stage-config-loaded">
+          Showing your last setup. Change what you need and generate again.
+        </p>
       )}
 
       <SportContext.Provider value={{ sport, entryType }}>

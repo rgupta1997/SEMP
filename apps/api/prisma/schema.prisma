@@ -35,6 +35,10 @@ model disciplines {
   display_order          Int                      @default(0)
   /// null = the platform catalogue; set = a custom discipline of that event only.
   championship_id        String?                  @db.Uuid
+  /// men | women | mixed; null = generic (offered to every gender).
+  gender                 String?                  @db.VarChar
+  /// time | distance | weight; null = the sport's default (or its template's match by name).
+  result_type            String?                  @db.VarChar
   career_stats           career_stats[]
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_disciplines tournament_disciplines[]

@@ -188,10 +188,16 @@ export function hydrateEvent(raw: any): EventState {
   const relayMembers = raw?.relayMembers && typeof raw.relayMembers === 'object'
     ? Object.fromEntries(Object.entries(raw.relayMembers as Record<string, unknown>).map(([k, v]) => [k,
       v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([r, ids]) => [r, strings(ids)])) : {}])) : null;
+  // Races added from setup: dropping them here lost them on reload, and the next save wiped them.
+  const extraEvents = Array.isArray(raw?.extraEvents)
+    ? raw.extraEvents.filter((e: any) => typeof e?.key === 'string' && typeof e?.label === 'string')
+      .map((e: any) => ({ key: e.key, label: e.label, ...(typeof e.resultType === 'string' ? { resultType: e.resultType } : {}) }))
+    : null;
   return {
     ...(events ? { events } : {}),
     ...(lineups ? { lineups } : {}),
     ...(relayMembers ? { relayMembers } : {}),
+    ...(extraEvents?.length ? { extraEvents } : {}),
     participants: ps.map((p: any, i: number) => ({
       id: typeof p?.id === 'string' ? p.id : `p${i}`,
       name: typeof p?.name === 'string' ? p.name : '',

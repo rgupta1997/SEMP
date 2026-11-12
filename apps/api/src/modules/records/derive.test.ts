@@ -375,6 +375,36 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     expect(eventMedals({ ...FIXTURE, ...EVENT_FIXTURE, format_config: cfg } as DerivableFixture)).toEqual([]);
   });
 
+  it('a named discipline running all classes medals in each class picked on the match', () => {
+    const medals = eventMedals({
+      ...FIXTURE, sport_name: 'Powerlifting', discipline_id: 'd-women', discipline_name: 'Women',
+      format_config: { subEventScope: 'all' },
+      live_state: { event: {
+        extraEvents: [{ key: 'c57', label: '57kg' }, { key: 'c63', label: '63kg' }],
+        participants: [
+          { id: 'a', name: 'A', orgId: 'o1', marks: { c57: 200 } },
+          { id: 'b', name: 'B', orgId: 'o2', marks: { c63: 260 } },
+        ],
+      } },
+    } as DerivableFixture);
+    expect(medals.map((m) => [m.competitor_id, m.medal, m.sub_event])).toEqual([['a', 'gold', '57kg'], ['b', 'gold', '63kg']]);
+  });
+
+  it('a race picked from setup ranks by its own type: a throw is highest-wins in athletics', () => {
+    const medals = eventMedals({
+      ...FIXTURE, sport_name: 'Athletics', discipline_id: 'd-men', discipline_name: 'Men',
+      format_config: { subEventScope: 'all' },
+      live_state: { event: {
+        extraEvents: [{ key: 'jav', label: 'Javelin', resultType: 'distance' }],
+        participants: [
+          { id: 'short', name: 'Short', orgId: 'o1', marks: { jav: 30 } },
+          { id: 'long', name: 'Long', orgId: 'o2', marks: { jav: 55 } },
+        ],
+      } },
+    } as DerivableFixture);
+    expect(medals.find((m) => m.medal === 'gold')?.competitor_id).toBe('long');
+  });
+
   it('is inert on a fixture with no event spec or no competitors', () => {
     expect(eventMedals(FIXTURE)).toEqual([]);
     expect(eventMedals({ ...FIXTURE, ...EVENT_FIXTURE, live_state: { event: { participants: [] } } } as DerivableFixture)).toEqual([]);
