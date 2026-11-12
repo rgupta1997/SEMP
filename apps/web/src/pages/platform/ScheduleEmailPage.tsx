@@ -131,7 +131,7 @@ export function ScheduleEmailPage() {
       title: 'Send the schedule email?',
       message: `This emails ${selectedCount} ${selectedCount === 1 ? 'person' : 'people'} across ${selectedOrgs} ${selectedOrgs === 1 ? 'org' : 'orgs'} for "${audience.eventName}".`
         + (multiOrgSelected ? ` ${multiOrgSelected} of them are in more than one org and each gets a single email.` : '')
-        + ' Re-sending never double-mails anyone.',
+        + ' Anyone already mailed will get it again.',
       confirmLabel: `Send to ${selectedCount}`,
     });
     if (!ok) return;

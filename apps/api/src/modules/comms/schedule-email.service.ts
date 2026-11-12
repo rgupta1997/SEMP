@@ -4,9 +4,14 @@
 // org, each flagged emailable/not with a reason) for the console to show and edit,
 // then SEND to exactly the user ids the super-admin confirmed. The send renders the
 // embedded raw-HTML template per recipient and posts through the same external mail
-// service as OTP (verified raw-HTML-capable 2026-11-10), de-duped per user so a
-// re-run after an audience edit never double-mails anyone.
+// service as OTP (verified raw-HTML-capable 2026-11-10).
+//
+// Re-sending is allowed: each send action gets its own sendId, and the idempotency
+// key is per (send, user). So the super-admin can mail the same person again as
+// often as they like, while a network retry WITHIN one send still never doubles up.
+// A person who is in several orgs still gets one email per send (ids are de-duped).
 
+import { randomUUID } from 'node:crypto';
 import type { Prisma } from '../../infra/prisma.js';
 import { env } from '../../config/env.js';
 import { sendMailBatch, MAIL_BATCH_LIMIT } from './mail-client.js';
@@ -154,11 +159,14 @@ export interface SendResult {
 }
 
 /** Mail the confirmed user ids. Re-validates each against the live audience and its
- *  emailability, so a stale or hand-crafted id can never slip a mail out. */
+ *  emailability, so a stale or hand-crafted id can never slip a mail out.
+ *  `sendId` identifies this one send action; a new one (the default) mails everyone
+ *  again even if they were mailed before. */
 export async function sendScheduleEmails(
   prisma: Prisma,
   championshipId: string,
   userIds: string[],
+  sendId: string = randomUUID(),
 ): Promise<SendResult> {
   const audience = await getScheduleAudience(prisma, championshipId);
   const byUser = new Map<string, AudiencePerson>();
@@ -212,7 +220,7 @@ export async function sendScheduleEmails(
   };
   const schedulePath = `/championships/${championshipId}/schedule`;
   const scheduleLink = `${env.WEB_APP_URL}/login?next=${encodeURIComponent(schedulePath)}`;
-  const subject = `${champ.name} — the fixtures are live`;
+  const subject = `${champ.name} - the fixtures are live`;
 
   let accepted = 0;
   let rejected = 0;
@@ -230,8 +238,8 @@ export async function sendScheduleEmails(
         html,
         text,
         priority: 7,
-        idempotencyKey: `schedule-live:${championshipId}:${p.userId}`,
-        metadata: { kind: 'schedule-live', championshipId },
+        idempotencyKey: `schedule-live:${championshipId}:${sendId}:${p.userId}`,
+        metadata: { kind: 'schedule-live', championshipId, sendId },
       };
     });
     const res = await sendMailBatch(messages);
