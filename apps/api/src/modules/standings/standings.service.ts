@@ -542,6 +542,8 @@ export interface BreakdownEvent {
   lost: number;
   detail: Record<string, number>;
   matches: BreakdownMatch[];
+  /** An event whose points count through its sport's title placing (always 0 here); kept for its medals. */
+  converted?: boolean;
 }
 
 // Explain one org's standings total: which events (draws) contributed how many points
@@ -689,6 +691,7 @@ export async function readStandingsBreakdown(
       won: 0, drawn: 0, lost: 0,
       detail: mine.detail,
       matches: [],
+      ...(c.converted ? { converted: true } : {}),
     });
   }
   for (const g of converted.groups) {
