@@ -247,8 +247,7 @@ interface EventContribution {
 interface ConvertedGroup { sport_id: string; tournament_id: string; sport: string; group: string; tallies: EntityTally[] }
 
 // Every ranking-event fixture's contribution, and each converted group's sport placings.
-// The raw points stay in the sport table; a converted sport adds only its placing to the
-// championship and tournament tables.
+// A converted sport adds only its title placings to every table, its own sport table included.
 function eventContributions(
   rows: EventFixtureRow[], index: RuleIndex, keyOf: (side: { organization_id: string; org_unit_id: string | null }) => string | null,
 ): { contributions: EventContribution[]; groups: ConvertedGroup[] } {
@@ -412,13 +411,15 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
   const events = eventContributions(eventFixtures as EventFixtureRow[], index, keyOf);
   for (const c of events.contributions) {
     const ts = c.fixture.tournament_disciplines!.tournament_sports;
-    accumulate(ensureBucket('sport', ts.sport_id).rows, c.tallies);
-    // A converted sport keeps its medals in the overall tables but scores its placing instead.
-    const overall = c.converted ? c.tallies.map((t) => ({ ...t, points: 0, detail: { ...t.detail } })) : c.tallies;
-    accumulate(ensureBucket('championship', null).rows, overall);
-    accumulate(ensureBucket('tournament', ts.tournament_id).rows, overall);
+    // A converted sport keeps its medals but scores its title placings instead, its own table
+    // included - showing raw event points there summed Men, Women and relays into one figure.
+    const scored = c.converted ? c.tallies.map((t) => ({ ...t, points: 0, detail: { ...t.detail } })) : c.tallies;
+    accumulate(ensureBucket('sport', ts.sport_id).rows, scored);
+    accumulate(ensureBucket('championship', null).rows, scored);
+    accumulate(ensureBucket('tournament', ts.tournament_id).rows, scored);
   }
   for (const g of events.groups) {
+    accumulate(ensureBucket('sport', g.sport_id).rows, g.tallies);
     accumulate(ensureBucket('championship', null).rows, g.tallies);
     accumulate(ensureBucket('tournament', g.tournament_id).rows, g.tallies);
   }
@@ -683,19 +684,17 @@ export async function readStandingsBreakdown(
       sport: td.tournament_sports.sports?.name ?? 'Event',
       discipline: td.disciplines?.name ?? null,
       scheme: 'medal',
-      // Outside the sport table a converted sport scores its placing (below), not raw points.
-      points: c.converted && scope !== 'sport' ? 0 : mine.points,
+      // A converted sport scores its title placing (below), not raw points, in every table.
+      points: c.converted ? 0 : mine.points,
       won: 0, drawn: 0, lost: 0,
       detail: mine.detail,
       matches: [],
     });
   }
-  if (scope !== 'sport') {
-    for (const g of converted.groups) {
-      const mine = g.tallies.find((t) => t.entity_id === entityId);
-      if (!mine) continue;
-      events.push({ draw_id: `${g.sport_id}:${g.group}`, sport: g.sport, discipline: g.group === EVENT_TITLE_GROUP.sport ? 'Sport placing' : `${TITLE_GROUP_LABEL[g.group.toLowerCase()] ?? g.group} title placing`, scheme: 'ranking', points: mine.points, won: 0, drawn: 0, lost: 0, detail: mine.detail, matches: [] });
-    }
+  for (const g of converted.groups) {
+    const mine = g.tallies.find((t) => t.entity_id === entityId);
+    if (!mine) continue;
+    events.push({ draw_id: `${g.sport_id}:${g.group}`, sport: g.sport, discipline: g.group === EVENT_TITLE_GROUP.sport ? 'Sport placing' : `${TITLE_GROUP_LABEL[g.group.toLowerCase()] ?? g.group} title placing`, scheme: 'ranking', points: mine.points, won: 0, drawn: 0, lost: 0, detail: mine.detail, matches: [] });
   }
 
   // Organiser adjustments that land in this scope.
