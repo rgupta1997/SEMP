@@ -102,7 +102,7 @@ async function main() {
     check('order paid + linked', ordA?.status === 'paid' && ordA.subscription_id === subs[0]?.id && ordA.invoice_id === invs[0]?.id);
 
     r = await call('POST', '/billing/checkout/verify', { orderId: `order_${TAG}_A`, paymentId: `pay_${TAG}_A`, signature: good });
-    check('replayed verify is a no-op', r.status === 200 && (await r.json()).state === 'already_paid');
+    check('replayed verify is a no-op', r.status === 200 && ((await r.json()) as { state?: string }).state === 'already_paid');
 
     console.log('\n3. webhook');
     r = await call('POST', '/webhooks/razorpay', hookBody, { 'x-razorpay-signature': 'bad' });
@@ -124,7 +124,7 @@ async function main() {
     r = await call('POST', `/billing/org/${org.id}/subscribe`, { plan: 'pro', period: 'monthly' });
     check('/subscribe refuses a paid plan', r.status === 400, `${r.status} ${await r.text()}`);
     r = await call('GET', `/billing/quote?ladder=org&plan=pro&period=monthly`);
-    check('quote reports gateway razorpay', (await r.json()).gateway === 'razorpay');
+    check('quote reports gateway razorpay', ((await r.json()) as { gateway?: string }).gateway === 'razorpay');
   } finally {
     server.close();
     await prisma.payment_orders.deleteMany({ where: { organization_id: org.id } });

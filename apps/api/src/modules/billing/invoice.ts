@@ -149,9 +149,11 @@ async function readUserBuyer(db: Db, userId: string): Promise<BuyerFields> {
  * could issue is many orders of magnitude below 2^53 paise.
  */
 export function serialiseInvoice<T extends Record<string, unknown>>(row: T) {
+  // Every bigint, not a named list: a named list missed discount_paise when the
+  // SaaS plans migration added it, and every billing page with an invoice 500'd.
   const out: Record<string, unknown> = { ...row };
-  for (const k of ['subtotal_paise', 'tax_paise', 'total_paise']) {
-    if (typeof out[k] === 'bigint') out[k] = Number(out[k] as bigint);
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === 'bigint') out[k] = Number(v);
   }
   return out;
 }
