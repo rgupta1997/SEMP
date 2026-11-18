@@ -46,7 +46,7 @@ export function makePlatformSettingsRouter(prisma: Prisma): Router {
     });
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.platformSettingChanged,
-      target: { type: 'platform_settings', id: INSIGHTS_ENABLED_SETTING, label: 'Player insights' },
+      target: { type: 'platform_settings', id: null, label: 'Player insights' },
       summary: enabled
         ? 'Turned player insights on - the insights card shows on career stats'
         : 'Turned player insights off - career stats show the tiles and filters only',
@@ -93,7 +93,7 @@ export function makePlatformSettingsRouter(prisma: Prisma): Router {
       });
       await audit(prisma, req, {
         action: AUDIT_ACTIONS.platformSettingChanged,
-        target: { type: 'platform_settings', id: FORMAT_VISIBILITY_SETTING, label: 'Match formats' },
+        target: { type: 'platform_settings', id: null, label: 'Match formats' },
         summary: `${shown ? 'Showed' : 'Hid'} the ${preset.sport} format "${preset.name}" in format pickers`,
         diff: { [presetKey]: { from: before, to: shown } },
       });
@@ -113,7 +113,7 @@ export function makePlatformSettingsRouter(prisma: Prisma): Router {
 
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.platformSettingChanged,
-      target: { type: 'platform_settings', id: PLANS_ENFORCED_SETTING, label: 'Plan enforcement' },
+      target: { type: 'platform_settings', id: null, label: 'Plan enforcement' },
       summary: enforced
         ? 'Turned plans on - saved plans apply again'
         : 'Turned plans off - everyone is treated as Enterprise',
