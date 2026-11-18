@@ -21,6 +21,8 @@ interface BreakdownEvent {
   lost: number;
   detail: Record<string, number>;
   matches: BreakdownMatch[];
+  /** Counted through its sport's title placing, so worth 0 here. */
+  converted?: boolean;
 }
 
 // Friendly labels for the placement/medal/participation keys the schemes emit.
@@ -50,10 +52,13 @@ const RESULT_STYLE: Record<BreakdownMatch['result'], { label: string; cls: strin
 
 // Expanded standings-row content: how an org's points were earned, grouped by event
 // (sport · discipline). `base` is the championship API path (authed or public token).
-export function StandingsBreakdown({ base, scope, scopeId, entityId }: { base: string; scope: string; scopeId: string | null; entityId: string }) {
+// `showConverted`: also list events counted through a title (their medals matter on the medal tally).
+export function StandingsBreakdown({ base, scope, scopeId, entityId, showConverted = false }:
+  { base: string; scope: string; scopeId: string | null; entityId: string; showConverted?: boolean }) {
   const q = `?scope=${scope}${scopeId ? `&scopeId=${scopeId}` : ''}&entityId=${entityId}`;
   const { data, isLoading } = useApi<{ events: BreakdownEvent[] }>(`${base}/standings/breakdown${q}`);
-  const events = data?.events ?? [];
+  // A points breakdown hides them: "+0 pts" reads as not counting, while the title placing row carries them.
+  const events = (data?.events ?? []).filter((e) => showConverted || !e.converted);
 
   if (isLoading) return <div className="py-4"><Spinner /></div>;
   if (events.length === 0) {

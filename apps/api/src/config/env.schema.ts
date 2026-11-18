@@ -1,3 +1,4 @@
+import { STORAGE_TRANSPORTS } from '@semp/shared';
 import { z } from 'zod';
 
 // The SHAPE of the environment, with no side effects: no dotenv, no `process.env`,
@@ -118,6 +119,20 @@ const schema = z.object({
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
+
+  // Uploaded files (event photo carousel), the same if/else as REALTIME_TRANSPORT:
+  // 'supabase' = Supabase Storage (beta), 's3' = an S3 bucket (prod). 'off' turns
+  // uploads off; the rest of the app runs as before. The bucket is public-read: these
+  // photos are marketing content on a public page.
+  STORAGE_TRANSPORT: z.enum(STORAGE_TRANSPORTS).default('off'),
+  STORAGE_BUCKET: z.string().min(1).optional(),
+  // S3 only: the bucket's region. Defaults to the Lambda's own region.
+  STORAGE_S3_REGION: z.string().min(1).optional(),
+  // Optional: the address files are served from (a CDN in front of the bucket). Unset,
+  // links point at the bucket itself.
+  STORAGE_PUBLIC_BASE_URL: z.string().url().optional(),
+  // Supabase only: the server key that may write to Storage. Never reaches the browser.
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
 
   // The fan-out queue. The API only ever enqueues; a separate Lambda publishes, and
   // the API's IAM role deliberately has no appsync:EventPublish permission at all.
@@ -264,6 +279,14 @@ export const envSchema = schema
   .refine((e) => !e.SUPABASE_JWT_SECRET || e.SUPABASE_JWT_SECRET !== e.JWT_SECRET, {
     path: ['SUPABASE_JWT_SECRET'],
     message: 'SUPABASE_JWT_SECRET must differ from JWT_SECRET - otherwise a realtime token works as a session',
+  })
+  .refine((e) => e.STORAGE_TRANSPORT === 'off' || !!e.STORAGE_BUCKET, {
+    path: ['STORAGE_BUCKET'],
+    message: 'STORAGE_TRANSPORT=supabase or s3 needs STORAGE_BUCKET',
+  })
+  .refine((e) => e.STORAGE_TRANSPORT !== 'supabase' || (!!e.SUPABASE_URL && !!e.SUPABASE_SERVICE_ROLE_KEY), {
+    path: ['SUPABASE_SERVICE_ROLE_KEY'],
+    message: 'STORAGE_TRANSPORT=supabase needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
   })
   .refine(
     (e) =>

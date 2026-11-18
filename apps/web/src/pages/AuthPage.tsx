@@ -1,5 +1,6 @@
-import { useCallback, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
+import { returnAfterLogin } from '../lib/browserStorage';
 import { BRAND } from '../lib/brand';
 import { useTheme } from '../lib/theme';
 import { SignInFlow } from '../features/auth/SignInFlow';
@@ -69,6 +70,16 @@ export function AuthPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Deep links from email (e.g. the "fixtures are live" blast) arrive as
+  // /login?next=/championships/<id>/schedule. Stash the target so the central
+  // post-login redirect in AppRoutes lands there. Only same-origin app paths are
+  // honoured - a leading single "/" and no "//" - so the param can't bounce a signed-in
+  // visitor to another site.
+  useEffect(() => {
+    const next = new URLSearchParams(location.search).get('next');
+    if (next && next.startsWith('/') && !next.startsWith('//')) returnAfterLogin.set(next);
+  }, [location.search]);
 
   // Redirect after auth is handled centrally in AppRoutes (it stays mounted across
   // the unauthenticated -> authenticated switch, unlike this page).

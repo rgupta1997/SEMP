@@ -37,6 +37,19 @@ export async function hostOrgManages(prisma: Prisma, userId: string, championshi
   });
 }
 
+/** Of these people, the ones who manage the institution hosting this championship. */
+export async function hostOrgManagerIds(prisma: Prisma, championshipId: string, userIds: string[]): Promise<Set<string>> {
+  const champ = await prisma.championships.findUnique({
+    where: { id: championshipId },
+    select: { host_organization_id: true },
+  });
+  const orgId = champ?.host_organization_id;
+  if (!orgId || userIds.length === 0) return new Set();
+  const unique = [...new Set(userIds)];
+  const allowed = await Promise.all(unique.map((id) => can(prisma, 'event.manage', { user: { id }, scope: { organizationId: orgId } })));
+  return new Set(unique.filter((_, i) => allowed[i]));
+}
+
 /**
  * Every championship this person manages, by either route.
  *

@@ -18,7 +18,7 @@ interface RoleAssignment {
   sport_ids?: string[];
   users_user_championship_roles_user_idTousers: { id: string; name: string; email: string; phone?: string | null };
   /** Either whoever the championship was created under, or - when it has one -
-   * a member of its host organisation. Represents the event by default rather
+   * someone who manages its host organisation's events. Represents the event by default rather
    * than someone the organising team added, so this row has no Remove button
    * (the server refuses to remove it too). */
   is_host: boolean;

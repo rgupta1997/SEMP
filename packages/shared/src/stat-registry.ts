@@ -1,4 +1,5 @@
 import type { EventTypeSpec } from './scoring.js';
+import { POWERLIFTING_LIFTS, type LiftKey } from './event-scoring.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import {
   atAdvantage, effectiveLevel, initKernel, isDecider, serveSpecFor, step,
@@ -828,9 +829,22 @@ const measured = (sport: string, bestAgg: 'min' | 'max', markNoun: string, unit?
   ],
 });
 
+// Best and average squat / bench / deadlift, from the optional lift inputs. Stat keys match POWERLIFTING_LIFTS.
+const LIFT_SHORT: Record<LiftKey, string> = { squat: 'SQ', bench: 'BP', deadlift: 'DL' };
+const liftMetric = (l: (typeof POWERLIFTING_LIFTS)[number], best: boolean): StatMetric => ({
+  key: `${best ? 'best' : 'average'}_${l.key}`, label: `${best ? 'Best' : 'Average'} ${l.label.toLowerCase()} (kg)`,
+  short: `${best ? '' : 'Avg '}${LIFT_SHORT[l.key]}`, unit: 'kg', source: 'entry', sourceKey: l.key,
+  aggregate: best ? 'max' : 'avg', headline: best, higherIsBetter: true,
+});
+const LIFT_METRICS: StatMetric[] = [
+  ...POWERLIFTING_LIFTS.map((l) => liftMetric(l, true)),
+  ...POWERLIFTING_LIFTS.map((l) => liftMetric(l, false)),
+];
+const powerlifting = measured('powerlifting', 'max', 'lift', 'kg');
+
 export const MEASURED_STAT_SPECS: SportStatSpec[] = [
   measured('swimming', 'min', 'time', 'seconds'),
-  measured('powerlifting', 'max', 'lift', 'kg'),
+  { ...powerlifting, metrics: [...powerlifting.metrics.slice(0, 2), ...LIFT_METRICS, ...powerlifting.metrics.slice(2)] },
   // No personal-best/average mark - a sprint (seconds) and a throw (metres)
   // aren't comparable, so placement is the only career figure Athletics gets
   // until marks fold per discipline instead of per sport.

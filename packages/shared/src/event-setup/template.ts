@@ -145,7 +145,7 @@ export const SETUP_TEMPLATE_SHEETS: SetupTemplateSheet[] = [
     columns: [
       { key: 'sport', header: 'Sport', required: true, hint: 'As in the Sportagon catalogue (Football, Cricket, Badminton…).', example: 'Football' },
       { key: 'discipline', header: 'Discipline', required: true, hint: "Men's, Women's, Mixed… Created for this event if the catalogue lacks it.", example: 'Mixed' },
-      { key: 'format', header: 'Format', required: true, hint: 'Knockout, League or Groups+Knockout.', example: 'Knockout', allowed: ['Knockout', 'League', 'Groups+Knockout'] },
+      { key: 'format', header: 'Format', required: true, hint: 'Knockout, League, Groups+Knockout, League+Knockout or Rankings. For the two-stage ones the group/league is built here; set how many advance to the knockout in Setup. Rankings = measured events (swimming/powerlifting/athletics).', example: 'Knockout', allowed: ['Knockout', 'League', 'Groups+Knockout', 'League+Knockout', 'Rankings'] },
       { key: 'squad_min', header: 'Squad min', required: false, hint: 'Fewest people a squad may have.', example: '6' },
       { key: 'squad_max', header: 'Squad max', required: false, hint: 'Most people a squad may have.', example: '10' },
       { key: 'match_minutes', header: 'Match minutes', required: false, hint: 'Whole match, all periods together (2 × 10 = 20).', example: '20' },

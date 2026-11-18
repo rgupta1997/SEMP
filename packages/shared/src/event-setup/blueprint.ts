@@ -106,7 +106,7 @@ export interface SetupVenueSpec {
   grounds: Array<{ key: string; name: string; type: 'court' | 'field' | 'pool' | 'track' | 'ring' | 'table' }>;
 }
 
-export const SETUP_DRAW_FORMATS = ['Knockout', 'League', 'Groups+Knockout'] as const;
+export const SETUP_DRAW_FORMATS = ['Knockout', 'League', 'Groups+Knockout', 'League+Knockout', 'Rankings'] as const;
 export type SetupDrawFormat = (typeof SETUP_DRAW_FORMATS)[number];
 
 export interface SetupDrawSpec {

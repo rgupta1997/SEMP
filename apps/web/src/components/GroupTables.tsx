@@ -78,6 +78,16 @@ export function TallyTabLabel({ drawId, canManage }: { drawId: string; canManage
 
 interface TieTarget { scope: 'pool' | 'placing'; stage: number; pool: number | null; entities: string[]; title: string }
 
+// Turn the API's field-prefixed validation text (e.g. "order: Array must contain at
+// least 2 element(s)") into one plain sentence for the organiser.
+function humanizeTieError(message?: string): string {
+  const raw = (message ?? '').replace(/^(order|reason|scope|stage|pool):\s*/i, '').trim();
+  if (/at least 2|contain|element/i.test(raw) || /^order:/i.test(message ?? '')) {
+    return 'Put the tied teams in order first, then save.';
+  }
+  return raw || 'Could not save the order. Please try again.';
+}
+
 function ResolveModal({ drawId, target, names, onClose }: { drawId: string; target: TieTarget; names: Record<string, string>; onClose: () => void }) {
   const [order, setOrder] = useState(target.entities);
   const [reason, setReason] = useState('');
@@ -97,16 +107,21 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
       footer={(
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={save.isPending || reason.trim().length < 3}
-            onClick={() => save.mutate(undefined, { onSuccess: () => { toast.success('Tie resolved'); onClose(); }, onError: (e: any) => toast.error(e.message) })}>
+          <Button disabled={save.isPending || order.length < 2 || reason.trim().length < 3}
+            onClick={() => save.mutate(undefined, { onSuccess: () => { toast.success('Tie resolved'); onClose(); }, onError: (e: any) => toast.error(humanizeTieError(e?.message)) })}>
             {save.isPending ? 'Saving…' : 'Save order'}
           </Button>
         </div>
       )}
     >
       <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-        These teams are level on every tie-breaker. Put them in the order decided (best first) and say how it was decided.
+        These teams are level on every tie-breaker. Drag them with the arrows into the order you decided (best at the top), then say how you decided below.
       </p>
+      {order.length < 2 && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          The tied teams didn't load, so there's nothing to order yet. Close this, refresh the table, and open it again.
+        </p>
+      )}
       <ol className="mb-4 space-y-1.5">
         {order.map((id, i) => (
           <li key={id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
@@ -118,8 +133,8 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
         ))}
       </ol>
       <label className="block">
-        <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
-        <Textarea rows={2} className="w-full" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Tie-breaker match, coin toss, fair play points" />
+        <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">How was it decided?</span>
+        <Textarea rows={2} className="w-full" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="How you broke the tie — e.g. head-to-head result, Buchholz score, coin toss. Not the team names." />
       </label>
     </Modal>
   );

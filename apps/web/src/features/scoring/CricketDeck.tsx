@@ -4,6 +4,7 @@ import {
   chaseLine, cricketHeadline, economy, extrasLine, foldCricket, inningsLine,
   oversLeft, oversOf, runRate, strikeRate,
   type CricketEvent, type CricketFormat, type CricketLog, type CricketSide, type CricketState, type Dismissal,
+  undoLast, redoLast, redoTarget, sealUndoTrail, type UndoEntry,
 } from '@semp/shared';
 import { Button, Card, cn, confirmDialog } from '../../components/ui';
 
@@ -66,7 +67,10 @@ export interface CricketDeckProps {
   /** Everyone on both squads, so a name already in the scorecard still reads after a sheet change. */
   everyone?: CricketPerson[];
   log: CricketLog;
-  onChange: (log: CricketLog, state: CricketState) => void;
+  /** The new trail rides along: Undo and Redo change it, a new action closes any pending Redo. */
+  onChange: (log: CricketLog, state: CricketState, undoTrail?: UndoEntry<CricketEvent>[]) => void;
+  /** Every Undo so far, with what it took off the log. */
+  undoTrail?: UndoEntry<CricketEvent>[];
   onSignOff: (log: CricketLog, state: CricketState) => void;
   /**
    * Leave the console for the page's admin sections (awards, the manual scorecard).
@@ -265,14 +269,24 @@ export function CricketDeck(p: CricketDeckProps) {
       state2 = foldCricket(format, next).state;
     }
     setSurface('pad');
-    p.onChange(next, state2);
+    p.onChange(next, state2, sealUndoTrail(p.undoTrail ?? []));
   };
 
+  const trail = p.undoTrail ?? [];
+  const redoNext = redoTarget(trail);
+  // Undo keeps a record of what it took off, so it can be shown and brought back.
   const undo = () => {
-    if (!log.length) return;
-    const next = log.slice(0, -1);
+    const last = log[log.length - 1];
+    const r = last && undoLast(log, trail, describeCricketEvent(last, nameOf));
+    if (!r) return;
     setSurface('pad');
-    p.onChange(next, foldCricket(format, next).state);
+    p.onChange(r.log, foldCricket(format, r.log).state, r.trail);
+  };
+  const redo = () => {
+    const r = redoLast(log, trail);
+    if (!r) return;
+    setSurface('pad');
+    p.onChange(r.log, foldCricket(format, r.log).state, r.trail);
   };
 
   // Every delivery carries the three people involved, so a later correction to the
@@ -459,6 +473,13 @@ export function CricketDeck(p: CricketDeckProps) {
           />
         )}
 
+        {/* Right after an undo: what came off, and one tap to put it back. */}
+        {showing === 'pad' && redoNext && (
+          <div className="flex shrink-0 items-center justify-between gap-2 rounded-lg border border-line px-2.5 py-1.5 text-xs">
+            <span className="min-w-0 truncate text-muted">↶ Undone: {redoNext.label}</span>
+            <Button size="sm" variant="outline" className="h-7 shrink-0" disabled={p.busy} onClick={redo}>Redo</Button>
+          </div>
+        )}
         {showing === 'pad' && (
           <RunPad
             busy={p.busy}
@@ -1338,4 +1359,26 @@ function Chips({ value, options, onChange, stacked }: {
       ))}
     </div>
   );
+}
+
+/** One logged ball or action as plain words, for the undo record ("4 runs", "Wide +1", "Wicket - bowled"). */
+function describeCricketEvent(ev: CricketEvent, nameOf: (id?: string | null) => string | null): string {
+  switch (ev.t) {
+    case 'ball': {
+      const extra = ev.extra ? `${ev.extra === 'noball' ? 'No-ball' : ev.extra[0].toUpperCase() + ev.extra.slice(1)}${ev.extraRuns ? ` +${ev.extraRuns}` : ''}` : null;
+      const runs = ev.runs || !extra ? `${ev.runs} run${ev.runs === 1 ? '' : 's'}` : null;
+      const wicket = ev.wicket ? `Wicket - ${ev.wicket.how.replace(/_/g, ' ')}` : null;
+      const batter = nameOf(ev.strikerId);
+      return [extra, runs, wicket].filter(Boolean).join(' · ') + (batter ? ` (${batter})` : '');
+    }
+    case 'retire': return `Retired${nameOf(ev.batterId) ? ` · ${nameOf(ev.batterId)}` : ''}`;
+    case 'penalty': return `Penalty ${ev.runs} run${ev.runs === 1 ? '' : 's'}`;
+    case 'swapEnds': return 'Batters swapped ends';
+    case 'setBowler': return `Bowler: ${nameOf(ev.bowlerId) ?? 'changed'}`;
+    case 'setBatter': return `Batter: ${nameOf(ev.batterId) ?? 'changed'}`;
+    case 'endInnings': return 'End of innings';
+    case 'toss': return 'Toss';
+    case 'end': return 'Match ended';
+    default: return 'Last action';
+  }
 }

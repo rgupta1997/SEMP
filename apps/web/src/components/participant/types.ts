@@ -42,6 +42,8 @@ export interface MatchSummary {
   /** Kho kho: settled on minimum chase or won by an innings. */
   settled?: Settlement | null;
   result: MatchResult;
+  /** Shirt number worn in this match (its team sheet); null with no sheet. */
+  my_jersey?: number | null;
 }
 
 export interface Achievement {

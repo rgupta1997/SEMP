@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { SetupMatchRowSpec } from '@semp/shared';
+import type { SetupDrawFormat, SetupDrawSpec, SetupMatchRowSpec } from '@semp/shared';
 import {
   CLEANUP_ORDER, CleanupRefusedError, buildDrawScoringFormat, cleanupBlueprint, createdCount, emptyManifest,
-  firstFree, generatedFixturesOf, knockoutFixturesOf, normaliseManifest, orgCodeOf, platformPlanOf,
-  provisionalLogin, slugOf, storableCredential, tableOfKey, type Manifest, type ManifestStore, type Resolution,
+  firstFree, generatedFixturesOf, isTwoStageSetupFormat, knockoutFixturesOf, normaliseManifest, orgCodeOf, platformPlanOf,
+  provisionalLogin, setupGeneratedFixtures, slugOf, storableCredential, tableOfKey, type Manifest, type ManifestStore, type Resolution,
 } from './engine.js';
 
 // The pure half of the engine. The database half (resolvePlatform / applyBlueprint)
@@ -137,6 +137,38 @@ describe('fixtures without a database', () => {
   it('generates a league over the squads in sheet order', () => {
     const gen = generatedFixturesOf('League', ['a', 'b', 'c', 'd'], false);
     expect(gen).toHaveLength(6);
+  });
+
+  const draw = (format: SetupDrawFormat): SetupDrawSpec =>
+    ({ key: 'd', sport: format === 'Rankings' ? 'Swimming' : 'Football', discipline: 'Mixed', format, squadMin: 1, squadMax: 10, thirdPlace: false });
+
+  it('Rankings builds one team-less event fixture, ignoring squads', () => {
+    const gen = setupGeneratedFixtures(draw('Rankings'), []);
+    expect(gen).toHaveLength(1);
+    expect(gen[0]!.round).toBe('Event');
+    expect(gen[0]!.homeTeamId).toBeNull();
+  });
+
+  it('League+Knockout builds only the league stage at import - no knockout seeds', () => {
+    const gen = setupGeneratedFixtures(draw('League+Knockout'), ['a', 'b', 'c', 'd']);
+    expect(gen).toHaveLength(6); // round-robin of 4
+    expect(gen.every((g) => g.homeTeamId && g.awayTeamId)).toBe(true);
+    expect(gen.some((g) => g.bracketPosition != null)).toBe(false);
+  });
+
+  it('Groups+Knockout builds only the group stage at import (split into pools, no bracket)', () => {
+    const gen = setupGeneratedFixtures(draw('Groups+Knockout'), ['a', 'b', 'c', 'd']);
+    expect(gen.length).toBeGreaterThan(0);
+    expect(gen.some((g) => g.poolNumber != null)).toBe(true);
+    expect(gen.some((g) => g.bracketPosition != null)).toBe(false);
+  });
+
+  it('isTwoStageSetupFormat is the compound formats only', () => {
+    expect(isTwoStageSetupFormat('Groups+Knockout')).toBe(true);
+    expect(isTwoStageSetupFormat('League+Knockout')).toBe(true);
+    expect(isTwoStageSetupFormat('Knockout')).toBe(false);
+    expect(isTwoStageSetupFormat('League')).toBe(false);
+    expect(isTwoStageSetupFormat('Rankings')).toBe(false);
   });
 });
 

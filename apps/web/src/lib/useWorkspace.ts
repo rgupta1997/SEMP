@@ -5,7 +5,7 @@ import { useAuth } from './auth';
 import { useApi } from './hooks';
 import { membershipRoleCode, TBD_LABEL } from '@semp/shared';
 import { themeOf } from './tenant-theme';
-import { EVENT_ROLE_CODES, PERSONAL_ONLY_ROUTE, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
+import { EVENT_ROLE_CODES, PERSONAL_ONLY_ROUTE, eventContextsFromRoles, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
 //
@@ -127,14 +127,7 @@ export function useWorkspace() {
         theme: themeOf(m.organization?.settings),
       }));
 
-    const events: WorkspaceContext[] = (ctx.championship_roles ?? []).map((r: any) => ({
-      id: r.championship_id,
-      kind: (r.championship?.status === 'draft' ? 'eventDraft' : 'event') as ContextKind,
-      name: r.championship?.name ?? 'Event',
-      roleCodes: r.role?.code ? [r.role.code] : [],
-      sub: r.championship?.status ?? undefined,
-      archived: !!r.championship?.archived_at,
-    }));
+    const events: WorkspaceContext[] = eventContextsFromRoles(ctx.championship_roles ?? []);
 
     // The rest of them. Assigned roles arrive with the auth context, so they are
     // built above and appear instantly; these need a request, so they are merged in

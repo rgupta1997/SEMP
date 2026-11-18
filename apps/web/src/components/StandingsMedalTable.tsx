@@ -107,7 +107,7 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
             </button>
             {isOpen && (
               <div className="pb-3">
-                <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} />
+                <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} showConverted />
               </div>
             )}
           </div>
@@ -161,7 +161,7 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
               {isOpen && (
                 <tr className="bg-slate-50/60 dark:bg-slate-800/20">
                   <td colSpan={7} className="px-4 pb-4 pt-0">
-                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} />
+                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} showConverted />
                   </td>
                 </tr>
               )}

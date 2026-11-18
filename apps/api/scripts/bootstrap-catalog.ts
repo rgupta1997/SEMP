@@ -81,6 +81,14 @@ const TOURNAMENT_FORMATS = [
         name: "Groups + Knockout",
         description: "Pool stage, then a knockout bracket among the group qualifiers",
     },
+    {
+        name: "League + Knockout",
+        description: "Round-robin league, then a knockout bracket among the top finishers",
+    },
+    {
+        name: "Rankings",
+        description: "Measured/ranking event (swimming, powerlifting, athletics) - no head-to-head matches",
+    },
 ];
 
 async function bootstrapSports() {

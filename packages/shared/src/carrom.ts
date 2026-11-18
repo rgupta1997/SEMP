@@ -1,4 +1,5 @@
 import type { RetirementPolicy, Side } from './scoring-rules.js';
+import { readUndoTrail, type UndoEntry } from './undo-trail.js';
 
 // ============================================================================
 // Carrom, scored the way it is played (ICF / AICF laws).
@@ -53,7 +54,12 @@ export interface CarromBoardsState {
   firstBreak: Side;
   /** Games given up mid-way, in the order they happened. */
   retirements?: CarromRetirement[];
+  /** Every Undo: the board or retirement it took back. */
+  undoTrail?: UndoEntry<CarromUndoItem>[];
 }
+
+/** What a carrom Undo can take back: the last board, or a retirement after it. */
+export type CarromUndoItem = { board: CarromBoard } | { retirement: CarromRetirement };
 
 /** A stored carrom state, tolerating anything malformed; null when there is none. */
 export function readCarromState(raw: unknown): CarromBoardsState | null {
@@ -68,7 +74,8 @@ export function readCarromState(raw: unknown): CarromBoardsState | null {
     !!x && typeof x === 'object' && ((x as CarromRetirement).side === 'A' || (x as CarromRetirement).side === 'B')
     && Number.isInteger((x as CarromRetirement).afterBoards) && (x as CarromRetirement).afterBoards >= 0
     && (x as CarromRetirement).afterBoards <= boards.length);
-  return { boards, firstBreak: r.firstBreak === 'B' ? 'B' : 'A', ...(retirements.length ? { retirements } : {}) };
+  const undoTrail = readUndoTrail<CarromUndoItem>((raw as { undoTrail?: unknown }).undoTrail);
+  return { boards, firstBreak: r.firstBreak === 'B' ? 'B' : 'A', ...(retirements.length ? { retirements } : {}), ...(undoTrail.length ? { undoTrail } : {}) };
 }
 
 export interface CarromRules {

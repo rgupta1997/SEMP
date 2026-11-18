@@ -12,6 +12,7 @@
  * several people is nobody's, a schedule sheet is a bracket.
  */
 import { matchPresetByKey } from '../match-format.js';
+import { isRankingSport } from '../event-templates.js';
 import {
   SETUP_EVENT_TYPES, SETUP_STEP_KEYS, SETUP_STEP_MODES,
   type EventSetupBlueprint, type SetupCompetitorSpec, type SetupDrawFormat, type SetupDrawSpec,
@@ -1326,11 +1327,16 @@ function readDraws(
     const formatRaw = r.get('format');
     let format: SetupDrawFormat = 'Knockout';
     if (!formatRaw) {
-      error('missing_value', `${label} (Draws row ${r.row}) has no Format. Write Knockout, League or Groups+Knockout.`, at('Format'));
+      error('missing_value', `${label} (Draws row ${r.row}) has no Format. Write Knockout, League, Groups+Knockout, League+Knockout or Rankings.`, at('Format'));
     } else {
       const f = drawFormat(formatRaw);
-      if (!f) error('bad_value', `${label} (Draws row ${r.row}): Format "${formatRaw}" is not Knockout, League or Groups+Knockout.`, at('Format'));
+      if (!f) error('bad_value', `${label} (Draws row ${r.row}): Format "${formatRaw}" is not Knockout, League, Groups+Knockout, League+Knockout or Rankings.`, at('Format'));
       else format = f;
+    }
+    // Rankings is only for measured sports with a built-in event template (swimming,
+    // powerlifting, athletics). Any other sport has no events to rank, so block it here.
+    if (format === 'Rankings' && !isRankingSport(sport)) {
+      error('bad_value', `${label} (Draws row ${r.row}): Rankings only works for measured sports (swimming, powerlifting, athletics). ${sport} is played as matches — use Knockout, League, Groups+Knockout or League+Knockout.`, at('Format'));
     }
 
     const whole = (key: string, column: string, positive: boolean): number | undefined => {
@@ -1401,6 +1407,8 @@ function drawFormat(raw: string): SetupDrawFormat | null {
   if (['knockout', 'ko', 'singleelimination', 'elimination'].includes(k)) return 'Knockout';
   if (['league', 'roundrobin', 'rr'].includes(k)) return 'League';
   if (['groupsknockout', 'groupknockout', 'groupsko', 'groupko', 'groupsandknockout', 'groupandknockout', 'poolsknockout', 'poolknockout'].includes(k)) return 'Groups+Knockout';
+  if (['leagueknockout', 'leagueko', 'leagueandknockout', 'roundrobinknockout', 'rrknockout', 'leagueplusknockout'].includes(k)) return 'League+Knockout';
+  if (['rankings', 'ranking', 'ranked', 'rank'].includes(k)) return 'Rankings';
   return null;
 }
 

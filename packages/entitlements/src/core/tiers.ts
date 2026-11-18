@@ -1,7 +1,7 @@
 // The ordered tier. Mirrors the Postgres `tier` enum declared in
 // 20260825000040_tier_enum.sql, and the order here must match the order there -
 // both sides rank by position, so a disagreement would silently grant or deny.
-// `starter` was added BEFORE 'pro' by 20261108000000_saas_plans.sql.
+// `starter` was added BEFORE 'pro' by 20261108100000_saas_plans.sql.
 
 export const TIERS = ['free', 'starter', 'pro', 'max'] as const;
 

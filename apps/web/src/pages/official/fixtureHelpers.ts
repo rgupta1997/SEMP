@@ -36,6 +36,8 @@ export function sportName(f: any): string | null {
 }
 /** Swimming's whole-sport console groups its swimmers by institute. */
 export function isSwimmingFixture(f: any): boolean { return /swim/i.test(sportName(f) ?? ''); }
+/** Powerlifting's console takes squat / bench / deadlift beside the total. */
+export function isPowerliftingFixture(f: any): boolean { return /powerlift/i.test(sportName(f) ?? ''); }
 export function sportIdOf(f: any): string | null {
   const ts = f.tournament_disciplines?.tournament_sports;
   return ts?.sport_id ?? ts?.sports?.id ?? null;

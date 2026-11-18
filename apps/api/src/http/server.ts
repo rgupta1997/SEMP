@@ -56,10 +56,12 @@ import { makeNotificationsRouter } from '../modules/notifications/notifications.
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
+import { makeScheduleEmailRouter } from '../modules/comms/schedule-email.routes.js';
 import { makeEventSetupRouter } from '../modules/event-setup/event-setup.routes.js';
 import { makeAwardTypesAdminRouter } from '../modules/awards/award-types.admin.routes.js';
 import { makeChampionshipAwardsRouter } from '../modules/awards/championship-awards.routes.js';
 import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
+import { makeEventPhotosRouter } from '../modules/event-photos/event-photos.routes.js';
 import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
 import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
 import { makeBillingRouter } from '../modules/billing/billing.routes.js';
@@ -150,6 +152,9 @@ export function buildApp(prisma: Prisma) {
   // ----- Demo sandboxes - super-admin only (guards are inside the router) -----
   api.use('/demos', makeDemosRouter(prisma));
 
+  // ----- "Fixtures are live" bulk email - super-admin only (guard inside the router) -----
+  api.use('/platform/schedule-email', makeScheduleEmailRouter(prisma));
+
   // ----- Event setup from the standard workbook - super-admin only (guard inside) -----
   api.use('/event-setups', makeEventSetupRouter(prisma));
 
@@ -160,6 +165,9 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Award catalogue + sport mapping - super-admin only, guard inside -----
   api.use('/platform/award-types', makeAwardTypesAdminRouter(prisma));
+
+  // ----- Event photo carousel (public Overview) - super-admin only, guard inside -----
+  api.use('/platform/event-photos', makeEventPhotosRouter(prisma));
 
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));

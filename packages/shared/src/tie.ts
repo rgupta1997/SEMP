@@ -4,6 +4,7 @@
 // Lives here (not in the web app) so BOTH the scoring console AND the API (demo
 // seeder, scripts) can build and evaluate tie states from one implementation.
 
+import { readUndoTrail, type UndoEntry } from './undo-trail.js';
 import type { ContestSpec, RubberSpec, TieSpec } from './scoring.js';
 import type { RallyLog } from './rally-kernel.js';
 import type { ScoringFormat } from './scoring-rules.js';
@@ -67,6 +68,8 @@ export interface RubberInstance {
   carrom?: CarromBoardsState;
   /** Pool rubbers: the frames recorded on the frame-by-frame console. */
   pool?: PoolRubberState;
+  /** Every Undo on this rubber's console (racquet, carrom, pool): what was undone, and any redo. */
+  undoTrail?: UndoEntry[];
 }
 
 /** Players per side in a rubber: an explicit size, else doubles by name. */
@@ -173,6 +176,7 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
         ...(rr.format && typeof rr.format === 'object' ? { format: rr.format } : {}),
         ...(readCarromState(rr.carrom) ? { carrom: readCarromState(rr.carrom)! } : {}),
         ...(readPoolState(rr.pool) ? { pool: readPoolState(rr.pool)! } : {}),
+        ...(readUndoTrail(rr.undoTrail).length ? { undoTrail: readUndoTrail(rr.undoTrail) } : {}),
       };
     });
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
@@ -301,7 +305,7 @@ export function reopenRubber(spec: TieSpec, state: TieState, index: number, rese
       delete reopened.drawn;
       delete reopened.ending;
       // A fresh re-score clears the points and their frozen rules; who played stays.
-      if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; delete reopened.carrom; delete reopened.pool; }
+      if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; delete reopened.carrom; delete reopened.pool; delete reopened.undoTrail; }
       return reopened;
     }
     return r.winner === null && r.status === 'dead' ? { ...r, status: 'pending' as RubberStatus } : r;

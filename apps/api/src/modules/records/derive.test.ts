@@ -276,6 +276,64 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     ]);
   });
 
+  // Whole-sport relay: one row per institute, the swimmers who swam it ticked beside it.
+  const RELAY_FIXTURE = {
+    ...EVENT_FIXTURE,
+    discipline_name: null,
+    format_config: {
+      scoring: {
+        fixtureType: 'event', scoringMode: 'detailed',
+        event: {
+          subEvents: [{ key: 'relay4', label: "Men's 4x25m Freestyle Relay", kind: 'relay' }],
+          result: { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
+        },
+      },
+    },
+    live_state: {
+      event: {
+        participants: [
+          { id: 'c1', name: 'Fast Swimmer', orgId: 'o1', marks: {} },
+          { id: 'c3', name: 'Third Swimmer', orgId: 'o2', marks: {} },
+          { id: 'relay:o1', name: 'O1 relay', orgId: 'o1', marks: { relay4: 61.2 } },
+          { id: 'relay:o2', name: 'O2 relay', orgId: 'o2', marks: { relay4: 60.1 } },
+        ],
+        relayMembers: { relay4: { 'relay:o1': ['c1'], 'relay:o2': ['c3'] } },
+      },
+    },
+  };
+
+  it('gives every swimmer of a relay the team medal, and the relay row to nobody', () => {
+    const { achievements } = deriveRecords(input(RELAY_FIXTURE, { participants: COMPETITORS }));
+    expect(achievements.map((a) => ({ u: a.user_id, m: a.medal, t: a.title.split(',')[0] }))).toEqual([
+      { u: 'su3', m: 'gold', t: "Gold - Men's 4x25m Freestyle Relay" },
+      { u: 'su1', m: 'silver', t: "Silver - Men's 4x25m Freestyle Relay" },
+    ]);
+  });
+
+  it('credits nobody for a relay whose swimmers were not ticked', () => {
+    const fx = { ...RELAY_FIXTURE, live_state: { event: { ...RELAY_FIXTURE.live_state.event, relayMembers: {} } } };
+    expect(deriveRecords(input(fx, { participants: COMPETITORS })).achievements).toEqual([]);
+  });
+
+  it('ranks a class added from the event setup, naming the medal after it', () => {
+    const fx = {
+      ...EVENT_FIXTURE, sport_name: 'Powerlifting', discipline_id: null, discipline_name: null,
+      format_config: {},
+      live_state: { event: {
+        extraEvents: [{ key: 'disc-105', label: 'Men ≤105kg' }],
+        participants: [
+          { id: 'c1', name: 'Fast Swimmer', orgId: 'o1', category: 'disc-105', marks: { 'disc-105': 610 } },
+          { id: 'c3', name: 'Third Swimmer', orgId: 'o2', category: 'disc-105', marks: { 'disc-105': 640 } },
+        ],
+      } },
+    };
+    const { achievements } = deriveRecords(input(fx, { participants: COMPETITORS }));
+    expect(achievements.map((a) => [a.user_id, a.medal, a.title.split(',')[0]])).toEqual([
+      ['su3', 'gold', 'Gold - Men ≤105kg'],
+      ['su1', 'silver', 'Silver - Men ≤105kg'],
+    ]);
+  });
+
   it('awards a medal only to competitors matched to an account', () => {
     const { achievements } = deriveRecords(input(EVENT_FIXTURE, { participants: COMPETITORS }));
     // c2 took silver but matched no account - no achievement, and nothing invented.
@@ -315,6 +373,36 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     const cfg: any = structuredClone(EVENT_FIXTURE.format_config);
     cfg.scoring.event.result.aggregate = 'sumBest';
     expect(eventMedals({ ...FIXTURE, ...EVENT_FIXTURE, format_config: cfg } as DerivableFixture)).toEqual([]);
+  });
+
+  it('a named discipline running all classes medals in each class picked on the match', () => {
+    const medals = eventMedals({
+      ...FIXTURE, sport_name: 'Powerlifting', discipline_id: 'd-women', discipline_name: 'Women',
+      format_config: { subEventScope: 'all' },
+      live_state: { event: {
+        extraEvents: [{ key: 'c57', label: '57kg' }, { key: 'c63', label: '63kg' }],
+        participants: [
+          { id: 'a', name: 'A', orgId: 'o1', marks: { c57: 200 } },
+          { id: 'b', name: 'B', orgId: 'o2', marks: { c63: 260 } },
+        ],
+      } },
+    } as DerivableFixture);
+    expect(medals.map((m) => [m.competitor_id, m.medal, m.sub_event])).toEqual([['a', 'gold', '57kg'], ['b', 'gold', '63kg']]);
+  });
+
+  it('a race picked from setup ranks by its own type: a throw is highest-wins in athletics', () => {
+    const medals = eventMedals({
+      ...FIXTURE, sport_name: 'Athletics', discipline_id: 'd-men', discipline_name: 'Men',
+      format_config: { subEventScope: 'all' },
+      live_state: { event: {
+        extraEvents: [{ key: 'jav', label: 'Javelin', resultType: 'distance' }],
+        participants: [
+          { id: 'short', name: 'Short', orgId: 'o1', marks: { jav: 30 } },
+          { id: 'long', name: 'Long', orgId: 'o2', marks: { jav: 55 } },
+        ],
+      } },
+    } as DerivableFixture);
+    expect(medals.find((m) => m.medal === 'gold')?.competitor_id).toBe('long');
   });
 
   it('is inert on a fixture with no event spec or no competitors', () => {

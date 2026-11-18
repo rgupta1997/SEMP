@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   atAdvantage, capLeader, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
-  formatResultUnit, resolveServer, resultEnvelope, serveCall, setResultUnits, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
-  type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
+  formatResultUnit, resolveServer, resultEnvelope, serveCall, setResultUnits, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock, undoLast, redoLast, redoTarget, sealUndoTrail,
+  type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side, type UndoEntry,
 } from '@semp/shared';
-import { ArrowLeftRight, CheckCircle2, ChevronDown, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, ChevronDown, Flag, Redo2, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
 import { Button, Card, cn, confirmDialog, Select, toast } from '../../components/ui';
 
 // ============================================================================
@@ -43,7 +43,10 @@ export interface RacquetDeckProps {
   awayPlayers?: string[];
   log: RallyLog;
   firstServer: Side;
-  onChange: (log: RallyLog, state: KernelState) => void;
+  /** The new trail rides along: Undo and Redo change it, a new action closes any pending Redo. */
+  onChange: (log: RallyLog, state: KernelState, undoTrail?: UndoEntry<RallyEvent>[]) => void;
+  /** Every Undo so far, with what it took off the log. */
+  undoTrail?: UndoEntry<RallyEvent>[];
   onSignOff: (log: RallyLog, state: KernelState) => void;
   /** Abandoned for now: keep the score and mark the fixture postponed. */
   onSuspend?: (log: RallyLog, state: KernelState) => void;
@@ -191,17 +194,23 @@ export function RacquetDeck(p: RacquetDeckProps) {
     return won.length ? `${won[won.length - 1].label} point` : null;
   };
 
+  const emit = (next: RallyLog, nextTrail: UndoEntry<RallyEvent>[] = sealUndoTrail(p.undoTrail ?? [])) =>
+    p.onChange(next, foldRally(format, next, firstServer).state, nextTrail);
   const push = (ev: RallyEvent) => {
     if (p.disabled) return;
     const next = [...log, { ...ev, at: new Date().toISOString() }];
-    p.onChange(next, foldRally(format, next, firstServer).state);
+    emit(next);
   };
 
+  const trail = p.undoTrail ?? [];
+  const redoNext = redoTarget(trail);
+  // Undo keeps a record: the log's own words for what went, so the log can show it.
   const undo = () => {
-    if (!log.length) return;
-    const next = log.slice(0, -1);
-    p.onChange(next, foldRally(format, next, firstServer).state);
+    const last = fold.trace[fold.trace.length - 1];
+    const r = undoLast(log, trail, last ? describeTrace(last, nameOf, format.sport) : 'Last action');
+    if (r) emit(r.log, r.trail);
   };
+  const redo = () => { const r = redoLast(log, trail); if (r) emit(r.log, r.trail); };
 
   const label = (n: number) => pointLabel(lv, n);
 
@@ -319,7 +328,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
     const added: RallyEvent[] = [{ t: 'timeout', side, at }];
     if (clockRunning && !clockPaused) added.push({ t: 'clockPause', at });
     const next = [...log, ...added];
-    p.onChange(next, foldRally(format, next, firstServer).state);
+    emit(next);
   };
   const endTimeout = () => {
     setTimeoutEnded(toIdx);
@@ -715,7 +724,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
               // go before another rally can be scored.
               if (terminal) {
                 const next = log.slice(0, -1);
-                p.onChange(next, foldRally(format, next, firstServer).state);
+                emit(next);
               }
             }}
           >
@@ -740,7 +749,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
               ...swapReceivers.map((side) => ({ t: 'switchReceiver', side, at }) as RallyEvent),
               ...(leftBox ? [{ t: 'switchBox', at } as RallyEvent] : []),
             ];
-            p.onChange(next, foldRally(format, next, firstServer).state);
+            emit(next);
           }}
         />
       ) : (
@@ -818,6 +827,10 @@ export function RacquetDeck(p: RacquetDeckProps) {
         <Button variant="outline" disabled={!log.length || p.disabled} onClick={undo} className="w-full gap-1.5 sm:w-auto">
           <Undo2 className="h-4 w-4" /> Undo
         </Button>
+        <Button variant="outline" disabled={!redoNext || p.disabled} onClick={redo} className="w-full gap-1.5 sm:w-auto"
+          title={redoNext ? `Redo: ${redoNext.label}` : 'Nothing to redo'}>
+          <Redo2 className="h-4 w-4" /> Redo
+        </Button>
         {format.letsEnabled && (!state.ended || rescoring) && (
           <Button variant="subtle" disabled={p.disabled} onClick={() => push({ t: 'let' })} className="w-full gap-1.5 sm:w-auto"
             title="Replay the rally - no point to anyone">
@@ -880,7 +893,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
       )}
 
       {/* ── Timeline ──────────────────────────────────────────────────────── */}
-      <Timeline format={format} log={log} firstServer={firstServer} homeName={homeName} awayName={awayName} />
+      <Timeline format={format} log={log} firstServer={firstServer} homeName={homeName} awayName={awayName} undoTrail={trail} />
     </div>
   );
 }
@@ -1473,8 +1486,8 @@ function pointPair(lv: LevelSpec, sc: readonly number[]): [string, string] {
 }
 
 /** The point log, newest first, with the score after each point and who served it. */
-function Timeline({ format, log, firstServer, homeName, awayName }:
-  { format: ScoringFormat; log: RallyLog; firstServer: Side; homeName: string; awayName: string }) {
+function Timeline({ format, log, firstServer, homeName, awayName, undoTrail = [] }:
+  { format: ScoringFormat; log: RallyLog; firstServer: Side; homeName: string; awayName: string; undoTrail?: UndoEntry<RallyEvent>[] }) {
   // Stepped by hand rather than folded, to keep the score as it stood after each event.
   const steps = useMemo(() => {
     let s = initKernel(format, firstServer);
@@ -1488,8 +1501,18 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
   }, [format, log, firstServer]);
   // Closed on a phone, where it pushes the controls off screen; open on wider screens.
   const [open, setOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches);
-  if (!log.length) return null;
+  if (!log.length && !undoTrail.length) return null;
   const rows = steps.map((x, i) => ({ ...x, i })).reverse().slice(0, 40);
+  // Undo and redo, newest first among the actions they touched.
+  const marks = undoTrail.flatMap((u) => [
+    { kind: 'undo' as const, at: u.undoneAt, label: u.label },
+    ...(u.redoneAt ? [{ kind: 'redo' as const, at: u.redoneAt, label: u.label }] : []),
+  ]);
+  const timeOf = (r: (typeof rows)[number]) => (log[r.i] as { at?: string } | undefined)?.at ?? '';
+  const merged = [
+    ...rows.map((r) => ({ type: 'row' as const, at: timeOf(r), r })),
+    ...marks.map((m) => ({ type: 'mark' as const, at: m.at, m })),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, 50);
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
   // Laid out like the team-sport and cricket logs: a titled card, the entry number in a
   // narrow muted column, the event in medium weight, the detail muted beside it.
@@ -1497,7 +1520,7 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
     <Card className="grid gap-2 p-3">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
         className="flex items-center justify-between gap-2 text-left">
-        <h3 className="text-sm font-semibold">What has been recorded <span className="font-normal text-slate-400 dark:text-slate-500">· {log.length}</span></h3>
+        <h3 className="text-sm font-semibold">What has been recorded <span className="font-normal text-slate-400 dark:text-slate-500">· {log.length}{undoTrail.length ? ` · ${undoTrail.length} undone` : ''}</span></h3>
         <span className="flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400">
           {open ? 'Hide' : 'Show'}
           <ChevronDown className={cn('h-3.5 w-3.5 transition', open && 'rotate-180')} />
@@ -1505,7 +1528,12 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
       </button>
       {open && (
       <ol className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm dark:divide-slate-800">
-        {rows.map(({ t, i, score }) => (
+        {merged.map((item, k) => item.type === 'mark' ? (
+          <li key={`m${k}`} className="flex items-baseline gap-2 py-1.5 text-slate-500 dark:text-slate-400">
+            <span className="w-8 shrink-0 text-right text-xs">{item.m.kind === 'undo' ? '↶' : '↷'}</span>
+            <span className="min-w-0 flex-1 italic">{item.m.kind === 'undo' ? 'Undone' : 'Redone'}: {item.m.label}</span>
+          </li>
+        ) : (({ t, i, score }) => (
           <li key={i} className="flex items-baseline gap-2 py-1.5">
             <span className="w-8 shrink-0 text-right font-mono text-[10px] tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
             <span className="min-w-0 flex-1">
@@ -1532,7 +1560,7 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
               </span>
             )}
           </li>
-        ))}
+        ))(item.r))}
       </ol>
       )}
     </Card>

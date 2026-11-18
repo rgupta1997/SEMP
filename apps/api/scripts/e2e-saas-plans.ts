@@ -1,5 +1,5 @@
 /**
- * End-to-end proof of the SaaS plans (20261108000000_saas_plans.sql), against the
+ * End-to-end proof of the SaaS plans (20261108100000_saas_plans.sql), against the
  * real database, through the real HTTP app - in process.
  *
  *   npx tsx scripts/e2e-saas-plans.ts
