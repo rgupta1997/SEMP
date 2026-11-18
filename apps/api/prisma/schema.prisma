@@ -2112,3 +2112,35 @@ model coupons {
   created_by      String?   @db.Uuid
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
 }
+
+/// Razorpay checkout attempts (20261118000000_payment_orders.sql). Hand-added with
+/// scalar FKs only, so the users/organizations models keep their back-relations.
+model payment_orders {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider            String         @default("razorpay")
+  provider_order_id   String
+  provider_payment_id String?
+  kind                String         @default("subscription")
+  ladder              String
+  organization_id     String?        @db.Uuid
+  user_id             String?        @db.Uuid
+  plan                tier
+  period              billing_period
+  list_price_paise    BigInt
+  discount_paise      BigInt         @default(0)
+  coupon_code         String?
+  total_paise         BigInt
+  status              String         @default("created")
+  error               String?
+  subscription_id     String?        @db.Uuid
+  invoice_id          String?        @db.Uuid
+  created_by          String?        @db.Uuid
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime       @default(now()) @db.Timestamptz(6)
+  paid_at             DateTime?      @db.Timestamptz(6)
+
+  @@unique([provider, provider_order_id], map: "idx_payment_orders_provider_order")
+  @@index([created_at], map: "idx_payment_orders_open")
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_payment_orders_org")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_payment_orders_user")
+}

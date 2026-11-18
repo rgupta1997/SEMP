@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { z } from 'zod';
 import {
   billingContactSchema,
   PLAN_PERIODS,
@@ -23,11 +24,14 @@ import {
   type Tier,
 } from '@semp/entitlements';
 import type { Prisma } from '../../infra/prisma.js';
+import { env } from '../../config/env.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { can } from '../../http/middleware/can.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { gatewayEnabled, verifyCheckoutSignature, verifyWebhookSignature } from './razorpay.js';
+import { priceCheckout, reconcileOpenOrders, settleOrder, startCheckout, type SettleOutcome } from './payments.service.js';
 import { serialiseInvoice } from './invoice.js';
 import { orgUsage } from './usage.js';
 import { couponProblem, discountFor, normaliseCode, type CouponRow } from './coupons.js';
@@ -51,10 +55,11 @@ import {
 // and a single route would have had to decide which rule applied from a field
 // the caller controls.
 //
-// There is no payment step. Subscribing writes the subscription, issues the
-// invoice and grants the tier in one transaction. Wiring a gateway later moves
-// only WHO calls `subscribe()` - the route becomes an intent, and the webhook
-// calls the service - so nothing downstream of it has to change.
+// Paying. With Razorpay configured (see razorpay.ts), a paid purchase is
+// `checkout` (creates the order) then `checkout/verify` or the webhook (settles
+// it - see payments.service.ts). `subscribe` then only takes purchases that cost
+// nothing. Without Razorpay configured, `subscribe` grants at once and the
+// invoice is marked provider 'none', as before.
 
 // The wire vocabulary in @semp/shared is a restatement of the entitlement one.
 // These two assignments are the check that it stays a restatement: if either
@@ -148,6 +153,7 @@ export function makeBillingRouter(prisma: Prisma): Router {
     }
     const discount = coupon?.discount ?? 0;
     res.json({
+      gateway: gatewayEnabled() ? 'razorpay' : 'none',
       ladder, plan: tier, period, selfServe: plan.selfServe,
       listPrice: amount, coupon,
       quote: withGst(amount - discount),
@@ -163,6 +169,8 @@ export function makeBillingRouter(prisma: Prisma): Router {
     // A scheduled change that came due while nobody was looking lands here, on
     // the read - see the note on applyDuePlanChanges for why there is no timer.
     await applyDuePlanChanges(prisma, { organizationId });
+    // A payment nobody confirmed (closed tab, missed webhook) lands here too.
+    await announceSettled(prisma, await reconcileOpenOrders(prisma, { organizationId }).catch(() => []));
 
     const org = await prisma.organizations.findUnique({
       where: { id: organizationId },
@@ -221,17 +229,30 @@ export function makeBillingRouter(prisma: Prisma): Router {
       // again on the write. Both, because a hidden button is a courtesy and the
       // guard is the boundary.
       mayBuy,
+      gateway: gatewayEnabled() ? 'razorpay' : 'none',
     });
   }));
 
   router.post('/org/:orgId/subscribe', requireBilling, validateBody(subscribeSchema), asyncHandler(async (req, res) => {
     const holder: Holder = { ladder: 'org', organizationId: req.params.orgId };
+    await refuseUnpaid(prisma, holder, req.body);
     const result = await subscribe(prisma, holder, req.body, req.user!.id);
     await announcePlanChange(prisma, holder, {
       type: 'plan_changed',
       from: result.from, to: result.to, actorId: req.user!.id,
     });
     res.status(201).json(result);
+  }));
+
+  router.post('/org/:orgId/checkout', requireBilling, validateBody(subscribeSchema), asyncHandler(async (req, res) => {
+    const holder: Holder = { ladder: 'org', organizationId: req.params.orgId };
+    const out = await startCheckout(prisma, holder, req.body, req.user!.id);
+    if (out.mode === 'granted') {
+      await announcePlanChange(prisma, holder, {
+        type: 'plan_changed', from: out.result.from, to: out.result.to, actorId: req.user!.id,
+      });
+    }
+    res.status(201).json(out);
   }));
 
   router.post('/org/:orgId/schedule-downgrade', requireBilling, validateBody(scheduleDowngradeSchema), asyncHandler(async (req, res) => {
@@ -300,6 +321,7 @@ export function makeBillingRouter(prisma: Prisma): Router {
   router.get('/me', asyncHandler(async (req, res) => {
     const holder: Holder = { ladder: 'personal', userId: req.user!.id };
     await applyDuePlanChanges(prisma, { userId: req.user!.id });
+    await reconcileOpenOrders(prisma, { userId: req.user!.id }).catch(() => []);
 
     const [tier, subscription, invoices] = await Promise.all([
       resolvedTier(prisma, holder),
@@ -320,13 +342,42 @@ export function makeBillingRouter(prisma: Prisma): Router {
       usage: [],
       invoices: invoices.map(serialiseInvoice),
       mayBuy: true,
+      gateway: gatewayEnabled() ? 'razorpay' : 'none',
     });
   }));
 
   router.post('/me/subscribe', validateBody(subscribeSchema), asyncHandler(async (req, res) => {
     const holder: Holder = { ladder: 'personal', userId: req.user!.id };
+    await refuseUnpaid(prisma, holder, req.body);
     const result = await subscribe(prisma, holder, req.body, req.user!.id);
     res.status(201).json(result);
+  }));
+
+  router.post('/me/checkout', validateBody(subscribeSchema), asyncHandler(async (req, res) => {
+    const holder: Holder = { ladder: 'personal', userId: req.user!.id };
+    res.status(201).json(await startCheckout(prisma, holder, req.body, req.user!.id));
+  }));
+
+  // ---- settling a checkout ----------------------------------------------
+
+  /**
+   * The browser's half: Razorpay Checkout hands back (order, payment, signature)
+   * and the page posts them here. The signature is the proof - only Razorpay and
+   * this server hold the secret - so any signed-in caller may present it; all it
+   * can do is grant what that order paid for, to whoever it was bought for.
+   */
+  router.post('/checkout/verify', validateBody(verifySchema), asyncHandler(async (req, res) => {
+    const { orderId, paymentId, signature } = req.body as z.infer<typeof verifySchema>;
+    if (!verifyCheckoutSignature(orderId, paymentId, signature)) {
+      throw new BusinessRuleError('We could not confirm that payment with Razorpay. If money left your account, it will be matched automatically within a few minutes.');
+    }
+    const outcome = await settleOrder(prisma, { orderId, paymentId, source: 'checkout' });
+    await announceSettled(prisma, [outcome], req.user!.id);
+    if (outcome.state === 'failed') {
+      throw new BusinessRuleError(`Your payment was received (ref ${paymentId}) but activating the plan failed. Our team has the details and will sort it out - you will not be charged twice.`);
+    }
+    if (outcome.state === 'unknown_order') throw new NotFoundError('Order');
+    res.json({ state: outcome.state, result: outcome.state === 'settled' ? outcome.result : null });
   }));
 
   router.post('/me/schedule-downgrade', validateBody(scheduleDowngradeSchema), asyncHandler(async (req, res) => {
@@ -384,6 +435,8 @@ export function makeBillingRouter(prisma: Prisma): Router {
    * and reports only what it actually moved.
    */
   router.post('/sweep', requireSuperAdmin, asyncHandler(async (_req, res) => {
+    const settled = await reconcileOpenOrders(prisma);
+    await announceSettled(prisma, settled);
     const applied = await applyDuePlanChanges(prisma);
     for (const change of applied) {
       await announcePlanChange(
@@ -394,9 +447,75 @@ export function makeBillingRouter(prisma: Prisma): Router {
         { type: 'plan_downgrade_applied', from: change.from, to: change.to, actorId: null },
       );
     }
-    res.json({ applied });
+    res.json({ applied, payments: settled.map((o) => o.state) });
   }));
 
+  return router;
+}
+
+const verifySchema = z.object({
+  orderId: z.string().min(1).max(64),
+  paymentId: z.string().min(1).max(64),
+  signature: z.string().min(1).max(256),
+});
+
+/**
+ * With the gateway on, `subscribe` must not hand out anything that costs money -
+ * otherwise calling it directly skips the payment. Free plans and 100% coupons
+ * still go through it.
+ */
+async function refuseUnpaid(prisma: Prisma, holder: Holder, input: { plan: Tier; period: BillingPeriod; coupon?: string | null }) {
+  if (!gatewayEnabled()) return;
+  const { total } = await priceCheckout(prisma, holder, input);
+  if (total > 0) throw new BusinessRuleError('This plan needs payment. Use checkout to pay for it.');
+}
+
+/** Announce every purchase a settlement pass actually granted (org ladder only - see announcePlanChange). */
+async function announceSettled(prisma: Prisma, outcomes: SettleOutcome[], actorId: string | null = null) {
+  for (const o of outcomes) {
+    if (o.state !== 'settled') continue;
+    await announcePlanChange(prisma, o.holder, {
+      type: 'plan_changed', from: o.result.from, to: o.result.to,
+      actorId: actorId ?? (o.result.subscription as { created_by?: string | null }).created_by ?? null,
+    });
+  }
+}
+
+/**
+ * Razorpay's half. Mounted BEFORE requireAuth (Razorpay sends no session) and
+ * authenticated by the HMAC over the raw body instead - server.ts keeps the raw
+ * bytes for /api/webhooks/* because a re-serialised body would not match.
+ *
+ * Register it in the Razorpay dashboard as SEMP's OWN webhook (events:
+ * order.paid, payment.captured) with its own secret. The FMS webhook on the same
+ * account is untouched; payments that are not SEMP orders are acknowledged and
+ * ignored here.
+ */
+export function makeRazorpayWebhookRouter(prisma: Prisma): Router {
+  const router = Router();
+  router.post('/razorpay', asyncHandler(async (req, res) => {
+    if (!gatewayEnabled() || !env.RAZORPAY_WEBHOOK_SECRET) {
+      res.status(503).json({ error: 'Webhook not configured' });
+      return;
+    }
+    const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
+    const signature = req.get('x-razorpay-signature') ?? '';
+    if (!raw || !signature || !verifyWebhookSignature(raw, signature)) {
+      res.status(400).json({ error: 'Invalid signature' });
+      return;
+    }
+    const event = req.body as { event?: string; payload?: { payment?: { entity?: { id?: string; order_id?: string; amount?: number } } } };
+    const payment = event.payload?.payment?.entity;
+    if ((event.event === 'order.paid' || event.event === 'payment.captured') && payment?.id && payment.order_id) {
+      const outcome = await settleOrder(prisma, {
+        orderId: payment.order_id, paymentId: payment.id, amountPaid: payment.amount, source: 'webhook',
+      });
+      await announceSettled(prisma, [outcome]);
+    }
+    // 200 for everything signed, handled or not, so Razorpay does not retry.
+    // A thrown error (database down) is a 500 and IS retried - which is right.
+    res.json({ received: true });
+  }));
   return router;
 }
 

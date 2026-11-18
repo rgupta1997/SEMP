@@ -56,12 +56,27 @@ type Tx = {
   $queryRaw: Function;
 };
 
-/** Validate and claim one use. Throws BusinessRuleError with a readable reason. */
+/**
+ * Validate and claim one use. Throws BusinessRuleError with a readable reason.
+ *
+ * `honourPaid` (paise) is settlement after a gateway payment: the buyer was
+ * quoted and charged the discounted amount, so the use is claimed even if the
+ * coupon has since expired or run out (redemptions may then exceed the cap by
+ * the payments that were in flight), and the discount recorded is the one
+ * actually given rather than a recomputation.
+ */
 export async function redeemCoupon(
   tx: Tx,
   input: { code: string; ladder: Ladder; plan: Tier; period: BillingPeriod; price: number },
+  opts: { honourPaid?: number } = {},
 ): Promise<{ code: string; paise: number }> {
   const code = normaliseCode(input.code);
+
+  if (opts.honourPaid !== undefined) {
+    await tx.$queryRaw`update coupons set redemptions = redemptions + 1 where code = ${code} returning code`;
+    return { code, paise: opts.honourPaid };
+  }
+
   const c = (await tx.coupons.findUnique({ where: { code } })) as CouponRow | null;
   const problem = couponProblem(c, input);
   if (problem) throw new BusinessRuleError(problem);

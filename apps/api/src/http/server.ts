@@ -64,7 +64,7 @@ import { makePlatformSettingsRouter } from '../modules/platform/platform-setting
 import { makeEventPhotosRouter } from '../modules/event-photos/event-photos.routes.js';
 import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
 import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
-import { makeBillingRouter } from '../modules/billing/billing.routes.js';
+import { makeBillingRouter, makeRazorpayWebhookRouter } from '../modules/billing/billing.routes.js';
 import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
 import { makeEventPlanGuards } from '../modules/billing/event-plan.guards.js';
 import { makePlansAdminRouter } from '../modules/billing/plans-admin.routes.js';
@@ -106,7 +106,14 @@ export function buildApp(prisma: Prisma) {
   // (certificate template logo/signature, claim evidence) - raised globally because
   // a per-route override can't help: this parser runs before any router is mounted,
   // so it has already rejected an oversized body before a route-level one ever sees it.
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({
+    limit: '5mb',
+    // Payment webhooks are authenticated by an HMAC over the exact bytes sent; a
+    // re-serialised body would not match. Kept only for that prefix.
+    verify: (req, _res, buf) => {
+      if ((req as { url?: string }).url?.startsWith('/api/webhooks/')) (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+    },
+  }));
   app.use(parseAuth);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -143,6 +150,9 @@ export function buildApp(prisma: Prisma) {
   // would say what it was for would be indistinguishable from a phishing page.
   // Accepting is a different matter and sits below the gate (see makeInviteAcceptRouter).
   api.use('/public', makePublicInviteRouter(prisma));
+
+  // Payment gateway webhooks (Razorpay). No session - authenticated by signature.
+  api.use('/webhooks', makeRazorpayWebhookRouter(prisma));
 
   // Everything below requires authentication.
   api.use(requireAuth);

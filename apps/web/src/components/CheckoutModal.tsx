@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Info, ShieldCheck } from 'lucide-react';
+import { Info, Lock, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
+import { CheckoutCancelled, payWithRazorpay, type RazorpayOrderHandoff } from '../lib/razorpay';
 import { useApi } from '../lib/hooks';
 import {
   formatPaise,
@@ -13,16 +14,14 @@ import { Button, Field, Input, Modal, Spinner, toast } from './ui';
 
 // Checkout.
 //
-// There is no payment step, and the screen says so rather than miming one. A
-// fake card form would teach people that the controls in this product are
-// decorative, which is expensive to unlearn - and it would be the second time,
-// because the billing panel it replaces already had a Change plan button with
-// nothing behind it.
+// The total is quoted by the server, the GST is the GST that will appear on the
+// invoice, and the buyer details are the ones it will be issued to.
 //
-// Everything else is real: the total is quoted by the server, the GST is the
-// GST that will appear on the invoice, and the buyer details are the ones it
-// will be issued to. When a gateway is wired, the confirm button gains a
-// redirect and this screen does not otherwise change.
+// The quote says which gateway is live. 'razorpay': confirming asks the server
+// for an order (`.../checkout`), opens Razorpay's modal for exactly that amount,
+// and posts the signed result to `/billing/checkout/verify`, which grants the
+// plan. 'none': there is no payment step, and the screen says so rather than
+// miming one - confirming activates at once and records the invoice.
 
 export interface CheckoutModalProps {
   plan: PlanView;
@@ -30,7 +29,7 @@ export interface CheckoutModalProps {
   ladder: 'org' | 'personal';
   /** Present on the org ladder: the billing contact the invoice is issued to. */
   contact?: BillingContact | null;
-  /** Where to POST. The two ladders differ only in this. */
+  /** Where to POST. The two ladders differ only in this. `.../checkout` sits beside it. */
   subscribePath: string;
   /** Where to PATCH the billing contact, when it can be edited from here. */
   contactPath?: string;
@@ -47,7 +46,7 @@ export function CheckoutModal({
   // purchase itself, inside its transaction.
   const [couponInput, setCouponInput] = useState('');
   const [coupon, setCoupon] = useState('');
-  const quote = useApi<{ quote: Quote | null; listPrice?: number; coupon?: { code: string; discount: number; error: string | null } | null }>(
+  const quote = useApi<{ gateway?: 'razorpay' | 'none'; quote: Quote | null; listPrice?: number; coupon?: { code: string; discount: number; error: string | null } | null }>(
     `/billing/quote?ladder=${ladder}&plan=${plan.tier}&period=${period}${coupon ? `&coupon=${encodeURIComponent(coupon)}` : ''}`,
   );
   const couponState = quote.data?.coupon ?? null;
@@ -59,6 +58,8 @@ export function CheckoutModal({
   const [busy, setBusy] = useState(false);
 
   const q = quote.data?.quote ?? null;
+  const online = quote.data?.gateway === 'razorpay' && !!q && q.total > 0;
+  const [stage, setStage] = useState<'idle' | 'paying' | 'confirming'>('idle');
 
   async function confirm() {
     setBusy(true);
@@ -75,13 +76,31 @@ export function CheckoutModal({
         if (Object.keys(changed).length > 0) await api('PATCH', contactPath, changed);
       }
 
-      await api('POST', subscribePath, { plan: plan.tier, period, coupon: couponOk ? coupon : null });
+      const body = { plan: plan.tier, period, coupon: couponOk ? coupon : null };
+      if (online) {
+        const out = await api<{ mode: 'granted' } | ({ mode: 'razorpay' } & RazorpayOrderHandoff)>(
+          'POST', subscribePath.replace(/\/subscribe$/, '/checkout'), body,
+        );
+        if (out.mode === 'razorpay') {
+          setStage('paying');
+          const paid = await payWithRazorpay(out);
+          setStage('confirming');
+          await api('POST', '/billing/checkout/verify', paid);
+        }
+      } else {
+        await api('POST', subscribePath, body);
+      }
       toast.success(`You are on ${plan.name}`, 'Everything the plan includes is available now.');
       onDone();
     } catch (e: any) {
-      toast.error('That did not go through', e?.message ?? 'Please try again.');
+      if (e instanceof CheckoutCancelled) {
+        toast.info('Payment cancelled', 'Nothing was charged. Your plan is unchanged.');
+      } else {
+        toast.error('That did not go through', e?.message ?? 'Please try again.');
+      }
     } finally {
       setBusy(false);
+      setStage('idle');
     }
   }
 
@@ -98,7 +117,10 @@ export function CheckoutModal({
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
             <Button onClick={confirm} disabled={busy || quote.isLoading || !q}>
-              {busy ? 'Activating…' : 'Confirm & activate'}
+              {stage === 'paying' ? 'Waiting for payment…'
+                : stage === 'confirming' ? 'Confirming payment…'
+                : busy ? (online ? 'Opening payment…' : 'Activating…')
+                : online ? `Pay ${formatPaise(q!.total)}` : 'Confirm & activate'}
             </Button>
           </div>
         </div>
@@ -174,9 +196,19 @@ export function CheckoutModal({
             </div>
           )}
 
-          {/* Said plainly. Somebody agreeing to this should know exactly what
+          {online ? (
+            <div className="flex gap-2.5 rounded-xl bg-slate-50 p-3.5 text-xs leading-relaxed text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+              <Lock size={15} className="mt-0.5 shrink-0" aria-hidden />
+              <div>
+                Payment is handled by <strong className="font-semibold">Razorpay</strong> - UPI, cards,
+                netbanking and wallets. The plan activates as soon as the payment is confirmed, and the
+                invoice is issued for {formatPaise(q!.total)}.
+              </div>
+            </div>
+          ) : (
+          /* Said plainly. Somebody agreeing to this should know exactly what
               they are agreeing to, and "no card is charged" is the thing they
-              would most want to have been told. */}
+              would most want to have been told. */
           <div className="flex gap-2.5 rounded-xl bg-amber-50 p-3.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
             <Info size={15} className="mt-0.5 shrink-0" aria-hidden />
             <div>
@@ -186,6 +218,7 @@ export function CheckoutModal({
               our team will settle with you directly.
             </div>
           </div>
+          )}
 
           <p className="flex gap-2 text-xs text-slate-500 dark:text-slate-400">
             <ShieldCheck size={14} className="mt-0.5 shrink-0" aria-hidden />

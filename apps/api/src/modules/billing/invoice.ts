@@ -44,6 +44,8 @@ export interface IssueInvoiceInput {
   amount: number;
   /** A coupon taken off the list price before GST. */
   discount?: { paise: number; code: string } | null;
+  /** Set when money actually moved through a gateway. Absent = provider 'none'. */
+  payment?: { provider: string; ref: string } | null;
 }
 
 /** Prisma client or transaction client - whichever the caller is holding. */
@@ -85,11 +87,13 @@ export async function issueInvoice(db: Db, input: IssueInvoiceInput): Promise<{ 
       discount_paise: BigInt(discount),
       coupon_code: discount > 0 ? input.discount!.code : null,
       ...buyer,
-      // Marked paid with provider 'none': access was granted, and the row is
-      // honest that no payment was taken for it. A reconciliation later can find
-      // every one of these with a single predicate.
+      // Paid either way: through the gateway (provider + its payment id), or with
+      // provider 'none' - access was granted and the row is honest that no
+      // payment was taken. A reconciliation can find every one of those with a
+      // single predicate.
       status: 'paid',
-      provider: 'none',
+      provider: input.payment?.provider ?? 'none',
+      provider_ref: input.payment?.ref ?? null,
       issued_at: now,
       paid_at: now,
     },

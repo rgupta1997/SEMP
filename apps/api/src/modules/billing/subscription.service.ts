@@ -104,26 +104,31 @@ export interface SubscribeResult {
   to: Tier;
 }
 
+/** Money that has already moved for this purchase (gateway settlement). */
+export interface PaymentProof {
+  provider: 'razorpay';
+  /** Razorpay payment id - written to the invoice and the subscription. */
+  ref: string;
+  /** The list price frozen at checkout, paise ex-GST. */
+  listPrice: number;
+  /** The coupon taken off at checkout, if any. Honoured even if it has since run out. */
+  discount: { code: string; paise: number } | null;
+}
+
 /**
- * Buy a plan, or move up to a dearer one. Takes effect at once.
+ * The rules a purchase must pass, checked BEFORE any money is asked for.
  *
  * Immediate is right for an UPGRADE and only for an upgrade: somebody who has
  * just paid to unlock Reports should not be told to come back in three weeks.
  * Moving DOWN goes through `scheduleDowngrade`, which honours the period already
  * paid for. Anything that is not a step up is refused here rather than silently
  * routed, because a downgrade billed as a purchase is a charge nobody authorised.
- *
- * There is no payment. `issueInvoice` records what WOULD have been charged and
- * marks it paid by provider 'none'; the tier is granted regardless. When a
- * gateway is wired, this function stops being called by the route and starts
- * being called by the webhook - the writes it performs do not change.
  */
-export async function subscribe(
+export async function preparePurchase(
   prisma: Prisma,
   holder: Holder,
-  input: { plan: Tier; period: BillingPeriod; coupon?: string | null },
-  actorId: string,
-): Promise<SubscribeResult> {
+  input: { plan: Tier; period: BillingPeriod },
+): Promise<{ from: Tier; price: number }> {
   const plan = planFor(holder.ladder, input.plan);
 
   if (!plan.selfServe) {
@@ -148,70 +153,112 @@ export async function subscribe(
     );
   }
 
+  return { from, price: priceOf(plan, input.period) ?? 0 };
+}
+
+/**
+ * Buy a plan, or move up to a dearer one, with no payment step. Takes effect at once.
+ *
+ * Used when no gateway is configured (the invoice is marked paid by provider
+ * 'none' - what WOULD have been charged), and for purchases that cost nothing
+ * (the free plan, a 100% coupon). With a gateway configured, a paid purchase
+ * goes through checkout instead and lands in `grantPurchase` from settlement.
+ */
+export async function subscribe(
+  prisma: Prisma,
+  holder: Holder,
+  input: { plan: Tier; period: BillingPeriod; coupon?: string | null },
+  actorId: string,
+): Promise<SubscribeResult> {
+  const { from, price } = await preparePurchase(prisma, holder, input);
+  return prisma.$transaction((tx) => grantPurchase(tx as unknown as Prisma, holder, input, actorId, { from, price, payment: null }));
+}
+
+/**
+ * The writes of a purchase, on the caller's transaction: supersede, create,
+ * audit, resolve the tier, claim the coupon, issue the invoice.
+ *
+ * With `payment`, money has already been taken: the price and discount are the
+ * ones frozen at checkout, the coupon is claimed even if it has run out since
+ * (the buyer paid the discounted amount; refusing now would keep their money),
+ * and the invoice and subscription carry the gateway's reference.
+ */
+export async function grantPurchase(
+  tx: Prisma,
+  holder: Holder,
+  input: { plan: Tier; period: BillingPeriod; coupon?: string | null },
+  /** Null when settlement runs for an order whose buyer has since been deleted. */
+  actorId: string | null,
+  ctx: { from: Tier; price: number; payment: PaymentProof | null },
+): Promise<SubscribeResult> {
   const now = new Date();
-  const price = priceOf(plan, input.period) ?? 0;
+  const { from, price, payment } = ctx;
 
-  return prisma.$transaction(async (tx) => {
-    // Whatever was running is superseded, not edited. Keeping the old row means
-    // "what were they on last March?" stays answerable, which is the question an
-    // invoice dispute always turns into.
-    const previous = await tx.subscriptions.findFirst({
-      where: { ...resolvedWhere(holder), status: { in: LIVE } },
-      orderBy: { created_at: 'desc' },
+  // Whatever was running is superseded, not edited. Keeping the old row means
+  // "what were they on last March?" stays answerable, which is the question an
+  // invoice dispute always turns into.
+  const previous = await tx.subscriptions.findFirst({
+    where: { ...resolvedWhere(holder), status: { in: LIVE } },
+    orderBy: { created_at: 'desc' },
+  });
+  if (previous) {
+    await tx.subscriptions.update({
+      where: { id: previous.id },
+      data: { status: 'cancelled', cancelled_at: now, updated_at: now },
     });
-    if (previous) {
-      await tx.subscriptions.update({
-        where: { id: previous.id },
-        data: { status: 'cancelled', cancelled_at: now, updated_at: now },
-      });
-    }
+  }
 
-    const created = await tx.subscriptions.create({
-      data: {
-        ladder: holder.ladder,
-        organization_id: holder.ladder === 'org' ? holder.organizationId : null,
-        user_id: holder.ladder === 'personal' ? holder.userId : null,
-        plan: input.plan,
-        period: input.period,
-        status: 'active',
-        current_period_start: now,
-        current_period_end: periodEnd(now, input.period),
-        provider: 'none',
-        created_by: actorId,
-      },
-    });
+  const created = await tx.subscriptions.create({
+    data: {
+      ladder: holder.ladder,
+      organization_id: holder.ladder === 'org' ? holder.organizationId : null,
+      user_id: holder.ladder === 'personal' ? holder.userId : null,
+      plan: input.plan,
+      period: input.period,
+      status: 'active',
+      current_period_start: now,
+      current_period_end: periodEnd(now, input.period),
+      provider: payment?.provider ?? 'none',
+      provider_ref: payment?.ref ?? null,
+      created_by: actorId,
+    },
+  });
 
-    await tx.subscription_events.create({
-      data: {
-        subscription_id: created.id,
-        kind: previous ? 'upgraded' : 'subscribed',
-        from_plan: from,
-        to_plan: input.plan,
-        actor_id: actorId,
-        effective_at: now,
-      },
-    });
+  await tx.subscription_events.create({
+    data: {
+      subscription_id: created.id,
+      kind: previous ? 'upgraded' : 'subscribed',
+      from_plan: from,
+      to_plan: input.plan,
+      actor_id: actorId,
+      effective_at: now,
+    },
+  });
 
-    await writeResolvedTier(tx, holder, input.plan);
+  await writeResolvedTier(tx, holder, input.plan);
 
-    // A coupon is claimed INSIDE this transaction: if anything below fails the
-    // redemption rolls back with it, so a failed purchase never burns a use.
-    const discount = price > 0 && input.coupon
+  // A coupon is claimed INSIDE this transaction: if anything below fails the
+  // redemption rolls back with it, so a failed purchase never burns a use.
+  const discount = payment
+    ? (payment.discount ? await redeemCoupon(tx, { code: payment.discount.code, ladder: holder.ladder, plan: input.plan, period: input.period, price }, { honourPaid: payment.discount.paise }) : null)
+    : price > 0 && input.coupon
       ? await redeemCoupon(tx, { code: input.coupon, ladder: holder.ladder, plan: input.plan, period: input.period, price })
       : null;
 
-    // The free plan is a real choice, not a purchase - it produces no document.
-    const invoiceId = price > 0
-      ? (await issueInvoice(tx, { subscriptionId: created.id, holder, plan: input.plan, period: input.period, amount: price, discount })).id
-      : null;
+  // The free plan is a real choice, not a purchase - it produces no document.
+  const invoiceId = price > 0
+    ? (await issueInvoice(tx, {
+        subscriptionId: created.id, holder, plan: input.plan, period: input.period, amount: price, discount,
+        payment: payment ? { provider: payment.provider, ref: payment.ref } : null,
+      })).id
+    : null;
 
-    return {
-      subscription: created as unknown as SubscriptionRow,
-      invoiceId,
-      from,
-      to: input.plan,
-    };
-  });
+  return {
+    subscription: created as unknown as SubscriptionRow,
+    invoiceId,
+    from,
+    to: input.plan,
+  };
 }
 
 // ---------------------------------------------------------------------------
