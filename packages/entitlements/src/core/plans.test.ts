@@ -31,13 +31,14 @@ const LADDERS: Ladder[] = ['org', 'personal'];
 describe('the catalogue covers the ladders', () => {
   it('has a plan for every tier on both ladders', () => {
     for (const ladder of LADDERS) {
-      expect(planLadder(ladder)).toHaveLength(3);
+      // Four slots on both ladders; the personal ladder does not OFFER starter.
+      expect(planLadder(ladder)).toHaveLength(ladder === 'org' ? 4 : 3);
       for (const tier of TIERS) {
         const p = planFor(ladder, tier);
         expect(p.ladder).toBe(ladder);
         expect(p.tier).toBe(tier);
         expect(p.tagline.length).toBeGreaterThan(0);
-        expect(p.adds.length).toBeGreaterThan(0);
+        if (p.offered) expect(p.adds.length).toBeGreaterThan(0);
       }
     }
   });
@@ -91,7 +92,7 @@ describe('the catalogue covers the ladders', () => {
     for (const ladder of LADDERS) {
       for (const tier of TIERS) {
         const p = planFor(ladder, tier);
-        if (p === ent) continue;
+        if (p === ent || !p.offered) continue;
         expect(p.selfServe, `${ladder}/${tier} is not self-serve`).toBe(true);
         expect(p.price.monthly).not.toBeNull();
       }
@@ -133,17 +134,19 @@ describe('what a plan includes is derived from the registry', () => {
 
   it('grows the included set at every step up', () => {
     for (const ladder of LADDERS) {
-      const [free, pro, max] = TIERS.map((t) => capabilitiesOn(ladder, t));
-      expect(pro.length).toBeGreaterThan(free.length);
-      expect(max.length).toBeGreaterThan(pro.length);
-      for (const k of free) expect(pro).toContain(k);
-      for (const k of pro) expect(max).toContain(k);
+      const sets = planLadder(ladder).map((p) => capabilitiesOn(ladder, p.tier));
+      for (let i = 1; i < sets.length; i++) {
+        expect(sets[i].length).toBeGreaterThan(sets[i - 1].length);
+        for (const k of sets[i - 1]) expect(sets[i]).toContain(k);
+      }
     }
   });
 
   it('points a locked capability at the cheapest plan that has it', () => {
-    expect(planUnlocking('multi_campus').tier).toBe('max');
-    expect(planUnlocking('multi_campus').name).toBe('Enterprise');
+    expect(planUnlocking('sso').tier).toBe('max');
+    expect(planUnlocking('sso').name).toBe('Enterprise');
+    expect(planUnlocking('manual_schedule').tier).toBe('starter');
+    expect(planUnlocking('multi_campus').tier).toBe('pro');
     expect(planUnlocking('advanced_reports').tier).toBe('pro');
     expect(planUnlocking('ai_coach').name).toBe('Elite');
   });
@@ -156,7 +159,7 @@ describe('limits', () => {
       for (const tier of TIERS) {
         const cap = planFor('org', tier).limits[key];
         if (cap === null || cap === undefined) { previous = Infinity; continue; }
-        expect(cap, `${key} tightened at ${tier}`).toBeGreaterThan(previous);
+        expect(cap, `${key} tightened at ${tier}`).toBeGreaterThanOrEqual(previous);
         previous = cap;
       }
       // The top of the ladder must end unlimited, or Enterprise has a ceiling
@@ -187,7 +190,7 @@ describe('limits', () => {
   });
 
   it('prints a ceiling with Indian grouping, and unlimited as a word', () => {
-    expect(formatLimit(planFor('org', 'pro').limits, 'people')).toBe('1,000');
+    expect(formatLimit(planFor('org', 'pro').limits, 'people')).toBe('2,000');
     expect(formatLimit(planFor('org', 'max').limits, 'people')).toBe('Unlimited');
   });
 

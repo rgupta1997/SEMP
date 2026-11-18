@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Pencil } from 'lucide-react';
 import {
   DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_LABEL, EVENT_TITLES, defaultGroupRanking, eventTitleIn, isRankingEvent, isRankingFormatName,
@@ -8,6 +8,7 @@ import {
 } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
+import { useEventPlan } from '../lib/eventPlan';
 import { MatchPointsFields, TiebreakerPicker } from './TiebreakerPicker';
 import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } from './ui';
 
@@ -31,6 +32,10 @@ const CHOICES: { value: Choice; label: string }[] = [
   { value: 'custom', label: 'Custom points (entered per match)' },
   { value: 'ranking', label: 'Event ranking (swimming, powerlifting)' },
 ];
+// Which point systems this event's plan does NOT include. Placings and event
+// ranking are the defaults every plan has; the rest are plan capabilities.
+const LockedChoices = createContext<(c: Choice) => boolean>(() => false);
+
 const choiceOf = (r: StandingsRule): Choice => (r.scheme === 'placement' && r.include_match_points ? 'both' : r.scheme);
 
 const PLACEMENT_DEFAULT: PlacementRule = {
@@ -205,6 +210,7 @@ function RuleForm({ value, onChange, option, inherited }: {
   value: StandingsRule; onChange: (r: StandingsRule) => void; option?: ScopeOption; inherited: InheritedRanking;
 }) {
   const choice = choiceOf(value);
+  const isLocked = useContext(LockedChoices);
   const rankingRow = isRankingRow(option);
   // A rule saved earlier that can't apply here stays listed, marked, until it's changed.
   const choices = rankingRow
@@ -221,7 +227,11 @@ function RuleForm({ value, onChange, option, inherited }: {
       <label className="flex flex-col gap-1">
         <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">What counts toward the overall table</span>
         <Select className="w-full max-w-sm" value={choice} onChange={(e) => onChange(ruleForChoice(e.target.value as Choice, value))}>
-          {choices.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          {choices.map((s) => {
+            // The current choice stays selectable so an existing rule still renders.
+            const locked = isLocked(s.value) && s.value !== choice;
+            return <option key={s.value} value={s.value} disabled={locked}>{locked ? `🔒 ${s.label} - not on this plan` : s.label}</option>;
+          })}
         </Select>
       </label>
 
@@ -569,6 +579,10 @@ function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
 }
 
 export function StandingsRulesCard({ eventId }: { eventId: string }) {
+  const plan = useEventPlan(eventId);
+  const lockedChoice = (c: Choice) =>
+    (c === 'custom' && !plan.has('custom_points'))
+    || ((c === 'both' || c === 'league_points' || c === 'medal') && !plan.has('standard_points'));
   const { data, isLoading } = useApi<RulesResponse>(`/championships/${eventId}/standings-rules`);
 
   if (isLoading || !data) {
@@ -599,6 +613,7 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
   const matchFormats = data.formats.filter((f) => !isRankingFormatName(f.name));
 
   return (
+    <LockedChoices.Provider value={lockedChoice}>
     <Card>
       <CardHeader
         title="Point System"
@@ -638,5 +653,6 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
         )}
       </CardBody>
     </Card>
+    </LockedChoices.Provider>
   );
 }

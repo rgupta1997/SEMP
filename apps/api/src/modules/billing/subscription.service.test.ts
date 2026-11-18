@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  adminSetPlan,
   applyDuePlanChanges,
+  grantDefaultOrgPlan,
   cancelScheduledDowngrade,
   liveSubscription,
   periodEnd,
@@ -63,6 +65,8 @@ function matches(row: any, where: any): boolean {
 
 function clientOver(get: () => Store) {
   return {
+    // syncEventPlans' championship updates - this double has no championships to move.
+    $executeRaw: async () => 0,
     subscriptions: {
       async findFirst({ where }: any) {
         return get().subscriptions.filter((r) => matches(r, where)).at(-1) ?? null;
@@ -455,5 +459,61 @@ describe('invoice numbering', () => {
     await subscribe(prisma, orgHolder, { plan: 'pro', period: 'annual' }, ACTOR);
     const numbers = prisma.store.invoices.map((i: any) => i.number);
     expect(new Set(numbers).size).toBe(numbers.length);
+  });
+});
+
+// ---- super-admin and default grants ------------------------------------------
+
+describe('adminSetPlan', () => {
+  it('sets any tier at once - including DOWN - with no invoice', async () => {
+    const prisma = fakePrisma(freshStore({ orgs: { [ORG]: { id: ORG, name: 'IIMB', plan: 'max' } } }));
+    const r = await adminSetPlan(prisma, orgHolder, { plan: 'pro', note: 'comp' }, ACTOR);
+    expect(r).toMatchObject({ from: 'max', to: 'pro' });
+    expect(prisma.store.orgs[ORG].plan).toBe('pro');
+    expect(prisma.store.invoices).toHaveLength(0);
+    expect(prisma.store.subscriptions.at(-1)).toMatchObject({ provider: 'admin', status: 'active', plan: 'pro' });
+    expect(prisma.store.events.at(-1)).toMatchObject({ kind: 'admin_set', actor_id: ACTOR, note: 'comp' });
+  });
+
+  it('makes a temporary plan a pending downgrade to free, which the sweep lands', async () => {
+    const prisma = fakePrisma(freshStore());
+    const until = new Date(Date.now() + 1000);
+    await adminSetPlan(prisma, orgHolder, { plan: 'pro', until }, ACTOR);
+    expect(prisma.store.subscriptions.at(-1)).toMatchObject({ status: 'pending_downgrade', pending_plan: 'free' });
+    // move the period end into the past and sweep
+    prisma.store.subscriptions.at(-1).current_period_end = new Date(Date.now() - 1000);
+    await applyDuePlanChanges(prisma, { organizationId: ORG });
+    expect(prisma.store.orgs[ORG].plan).toBe('free');
+  });
+
+  it('refuses an end date in the past', async () => {
+    const prisma = fakePrisma(freshStore());
+    await expect(adminSetPlan(prisma, orgHolder, { plan: 'pro', until: new Date(Date.now() - 1000) }, ACTOR)).rejects.toThrow(/future/);
+  });
+
+  it('moving to free cancels what was running and starts nothing', async () => {
+    const prisma = fakePrisma(freshStore());
+    await adminSetPlan(prisma, orgHolder, { plan: 'pro' }, ACTOR);
+    await adminSetPlan(prisma, orgHolder, { plan: 'free' }, ACTOR);
+    expect(prisma.store.orgs[ORG].plan).toBe('free');
+    expect(await liveSubscription(prisma, orgHolder)).toBeNull();
+  });
+
+  it('works on the personal ladder without touching the org', async () => {
+    const prisma = fakePrisma(freshStore());
+    await adminSetPlan(prisma, meHolder, { plan: 'max' }, ACTOR);
+    expect(prisma.store.users[USER].personal_plan).toBe('max');
+    expect(prisma.store.orgs[ORG].plan).toBe('free');
+  });
+});
+
+describe('grantDefaultOrgPlan', () => {
+  it('starts a new organisation on Pro, as a complimentary subscription', async () => {
+    const prisma = fakePrisma(freshStore());
+    const tier = await prisma.$transaction((tx: any) => grantDefaultOrgPlan(tx, ORG, ACTOR));
+    expect(tier).toBe('pro');
+    expect(prisma.store.orgs[ORG].plan).toBe('pro');
+    expect(prisma.store.subscriptions.at(-1)).toMatchObject({ provider: 'admin', plan: 'pro', status: 'active' });
+    expect(prisma.store.events.at(-1)).toMatchObject({ kind: 'default_grant' });
   });
 });

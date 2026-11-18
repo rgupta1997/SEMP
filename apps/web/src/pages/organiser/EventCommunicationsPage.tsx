@@ -7,6 +7,7 @@ import { NotificationComposeModal } from '../../components/NotificationComposeMo
 import { NotificationItem } from '../../components/NotificationItem';
 import { Button, EmptyState, PageHeader, Spinner } from '../../components/ui';
 import { useEvent } from './EventLayout';
+import { LockMark, useEventPlan } from '../../lib/eventPlan';
 
 // Communications for one event.
 //
@@ -24,10 +25,14 @@ export function EventCommunicationsPage() {
   const [composing, setComposing] = useState(false);
   // Refused by the server too; disabled here so nobody writes an announcement first.
   const archived = !!championship.archived_at;
+  // Announcements are a plan capability; the history below stays readable either way.
+  const commsOk = useEventPlan(eventId).has('event_communications');
   const announce = (
     // Up to 440px the full label wrapped to two lines and ran over the page title.
-    <Button className="whitespace-nowrap" disabled={archived} title={archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined} onClick={() => setComposing(true)}>
-      <Megaphone size={15} aria-hidden />
+    <Button className="whitespace-nowrap" disabled={archived || !commsOk}
+      title={archived ? ARCHIVED_READ_ONLY_MESSAGE : !commsOk ? 'Event communications are not on this event’s plan' : undefined}
+      onClick={() => setComposing(true)}>
+      {!commsOk ? <LockMark capability="event_communications" /> : <Megaphone size={15} aria-hidden />}
       {/* One breakpoint both sides (max = "< 441", min = ">= 441"), so no width shows both. */}
       <span className="max-[441px]:hidden">Make an announcement</span>
       <span className="min-[441px]:hidden">Announce</span>

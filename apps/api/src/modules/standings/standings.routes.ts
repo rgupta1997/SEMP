@@ -11,6 +11,7 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { AUDIT_ACTIONS, audit } from '../iam/audit.service.js';
 import { readStandings, readStandingsBreakdown, recomputeStandingsAtomic, countCompletedMatches } from './standings.service.js';
 import { readTitleTally } from './title-tally.service.js';
+import { assertEventCapability, capabilityForScheme } from '../billing/event-plan.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
 // Mounted under /championships alongside the events router.
@@ -120,6 +121,9 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     const championshipId = req.params.id;
     const { scope_type, config } = req.body;
     const scope_id = scope_type === 'championship' ? null : req.body.scope_id;
+    // Placement / ranking are the default points; anything else is a plan capability.
+    const needs = capabilityForScheme(config);
+    if (needs) await assertEventCapability(prisma, championshipId, needs, req.user!);
 
     const existing = await prisma.standings_rules.findFirst({
       where: { championship_id: championshipId, scope_type, scope_id: scope_id ?? null },

@@ -61,28 +61,28 @@ describe('requireCapability', () => {
   });
 
   it('still refuses a max-tier capability on pro', async () => {
-    const r = await run(requireCapability('multi_campus', orgParam), MEMBER, { id: 'org-pro' });
+    const r = await run(requireCapability('sso', orgParam), MEMBER, { id: 'org-pro' });
     expect(r.ok).toBe(false);
-    expect(r.capability).toBe('multi_campus');
+    expect(r.capability).toBe('sso');
   });
 
   it('gates the org in the PATH, not the caller’s own org', async () => {
     // The caller belongs to a free org; the request is about a max one. Reading
     // the caller's own organisation here would refuse a legitimate request - and,
     // worse, would allow one the other way round.
-    const r = await run(requireCapability('multi_campus', orgParam), MEMBER, { id: 'org-max' });
+    const r = await run(requireCapability('sso', orgParam), MEMBER, { id: 'org-max' });
     expect(r.ok).toBe(true);
   });
 
   it('lets super admins through by default', async () => {
-    const r = await run(requireCapability('multi_campus', orgParam), SUPER, { id: 'org-free' });
+    const r = await run(requireCapability('sso', orgParam), SUPER, { id: 'org-free' });
     expect(r.ok).toBe(true);
   });
 
   it('but not when the route asks for the gate to be exercised', async () => {
     // Anything used to demo or test tier behaviour must pass allowSuperAdmin:false,
     // or a super admin silently bypassing makes a broken gate look like a working one.
-    const guard = requireCapability('multi_campus', { ...orgParam, allowSuperAdmin: false });
+    const guard = requireCapability('sso', { ...orgParam, allowSuperAdmin: false });
     const r = await run(guard, SUPER, { id: 'org-free' });
     expect(r.ok).toBe(false);
   });

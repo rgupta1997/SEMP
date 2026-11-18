@@ -100,6 +100,11 @@ model championships {
   archived_by                String?                      @db.Uuid
   /// Archived by its organisation's archive (20260929000000) - restored with it, never purged while it lasts.
   archived_with_org          Boolean                      @default(false)
+  /// SaaS plans (20261108000000): the plan this event was booked on, where it came from
+  /// (org|pass|admin|legacy) and when a lapsed org's grace ends. See entitlements core/eventPlan.ts.
+  plan_tier                  tier?
+  plan_source                String                       @default("org") @db.VarChar(8)
+  plan_grace_until           DateTime?                    @db.Timestamptz(6)
   users_archived_by          users?                       @relation("championships_archived_byTousers", fields: [archived_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   certificates               certificates[]
   championship_invitations   championship_invitations[]
@@ -1538,6 +1543,8 @@ model invoices {
   buyer_gstin     String?
   place_of_supply String?
   sac_code        String         @default("998314")
+  discount_paise  BigInt         @default(0)
+  coupon_code     String?
   status          String         @default("paid")
   provider        String         @default("none")
   provider_ref    String?
@@ -2021,6 +2028,7 @@ enum subscription_status {
 
 enum tier {
   free
+  starter
   pro
   max
 }
@@ -2034,4 +2042,105 @@ enum role_scope {
   whole_org
   campus_unit
   single_event
+}
+
+// ---- SaaS plans (20261108000000_saas_plans.sql) ---------------------------
+// Hand-added rather than `db pull`ed: a pull rewrites the whole file. FKs to
+// users/organizations are plain scalars so the big models gain no back-relations.
+
+model plan_catalog {
+  ladder     String
+  tier       tier
+  overrides  Json     @default("{}")
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_by String?  @db.Uuid
+
+  @@id([ladder, tier])
+}
+
+model plan_catalog_settings {
+  id         Int      @id @default(1) @db.SmallInt
+  min_tiers  Json     @default("{}")
+  settings   Json     @default("{}")
+  version    BigInt   @default(1)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_by String?  @db.Uuid
+}
+
+model addons {
+  key           String       @id
+  name          String
+  description   String       @default("")
+  unit          String       @default("month")
+  price_paise   BigInt?
+  status        String       @default("coming_soon")
+  included_from tier?
+  sort          Int          @default(0)
+  updated_at    DateTime     @default(now()) @db.Timestamptz(6)
+  org_addons    org_addons[]
+}
+
+model org_addons {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String    @db.Uuid
+  addon_key       String
+  quantity        Int       @default(1)
+  status          String    @default("active")
+  starts_at       DateTime  @default(now()) @db.Timestamptz(6)
+  ends_at         DateTime? @db.Timestamptz(6)
+  granted_by      String?   @db.Uuid
+  note            String?
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  addons          addons    @relation(fields: [addon_key], references: [key], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_org_addons_org")
+}
+
+model coupons {
+  code            String    @id
+  description     String    @default("")
+  kind            String
+  value           Int
+  ladder          String    @default("org")
+  tiers           String[]
+  periods         String[]
+  valid_from      DateTime? @db.Timestamptz(6)
+  valid_until     DateTime? @db.Timestamptz(6)
+  max_redemptions Int?
+  redemptions     Int       @default(0)
+  active          Boolean   @default(true)
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// Razorpay checkout attempts (20261118000000_payment_orders.sql). Hand-added with
+/// scalar FKs only, so the users/organizations models keep their back-relations.
+model payment_orders {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider            String         @default("razorpay")
+  provider_order_id   String
+  provider_payment_id String?
+  kind                String         @default("subscription")
+  ladder              String
+  organization_id     String?        @db.Uuid
+  user_id             String?        @db.Uuid
+  plan                tier
+  period              billing_period
+  list_price_paise    BigInt
+  discount_paise      BigInt         @default(0)
+  coupon_code         String?
+  total_paise         BigInt
+  status              String         @default("created")
+  error               String?
+  subscription_id     String?        @db.Uuid
+  invoice_id          String?        @db.Uuid
+  created_by          String?        @db.Uuid
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime       @default(now()) @db.Timestamptz(6)
+  paid_at             DateTime?      @db.Timestamptz(6)
+
+  @@unique([provider, provider_order_id], map: "idx_payment_orders_provider_order")
+  @@index([created_at], map: "idx_payment_orders_open")
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_payment_orders_org")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_payment_orders_user")
 }

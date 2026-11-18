@@ -8,6 +8,7 @@ import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 import { verifySignature, type CertificateFacts } from '../certificates/certificates.service.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { planCatalogPayload } from '../billing/billing.routes.js';
 import { listPublicPhotosSafe } from '../event-photos/event-photos.service.js';
 
 // Unauthenticated, view-only championship pages reachable via a share token. Mounted
@@ -26,6 +27,13 @@ export function makePublicRouter(prisma: Prisma): Router {
     if (!champ || champ.archived_at) throw new NotFoundError('Shared championship');
     return id;
   };
+
+  // The live plan catalogue for the marketing site's pricing page. Public: prices
+  // are published. Offered plans and on-sale add-ons only.
+  router.get('/plans', asyncHandler(async (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(await planCatalogPayload(prisma));
+  }));
 
   // Overview: championship header + sports + headline counts + carousel photos.
   router.get('/championships/:token/overview', asyncHandler(async (req, res) => {

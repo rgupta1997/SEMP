@@ -28,26 +28,68 @@ export interface LimitDef {
   unit: string;
   /** Where the count comes from, so the enforcing route is findable from here. */
   counts: string;
+  /**
+   * What the count is taken over. `org` ceilings are metered on the billing
+   * panel; `event` ceilings apply per championship and are checked against the
+   * event's own plan (see eventPlan.ts).
+   */
+  scope: 'org' | 'event';
 }
 
 export const LIMITS = {
   active_events: {
-    ladder: 'org',
+    ladder: 'org', scope: 'org',
     label: 'Active events',
     unit: 'event',
-    counts: 'Championships hosted by this institution that are not completed or cancelled',
+    counts: 'Championships hosted by this institution that are not completed or archived',
+  },
+  events_total: {
+    ladder: 'org', scope: 'org',
+    label: 'Events in total',
+    unit: 'event',
+    counts: 'Every championship this institution has ever hosted, finished or not',
   },
   people: {
-    ladder: 'org',
+    ladder: 'org', scope: 'org',
     label: 'People on the roll',
     unit: 'person',
     counts: 'Students and players in this institution’s directory',
   },
   staff_seats: {
-    ladder: 'org',
+    ladder: 'org', scope: 'org',
     label: 'Staff seats',
     unit: 'staff member',
     counts: 'Active members holding a staff role - owner, admin or captain',
+  },
+  campuses: {
+    ladder: 'org', scope: 'org',
+    label: 'Campuses',
+    unit: 'campus',
+    counts: 'Active campus units in this institution',
+  },
+  teams_per_event: {
+    ladder: 'org', scope: 'event',
+    label: 'Teams per event',
+    unit: 'team',
+    counts: 'Teams entered into one championship',
+  },
+  participants_per_event: {
+    ladder: 'org', scope: 'event',
+    label: 'People per event',
+    unit: 'person',
+    counts: 'Distinct players on the rosters of teams entered into one championship',
+  },
+  draws_per_event: {
+    ladder: 'org', scope: 'event',
+    label: 'Tournaments per event',
+    unit: 'tournament',
+    counts: 'Draws (sport or discipline brackets) in one championship',
+  },
+  disciplines_per_sport: {
+    ladder: 'org', scope: 'event',
+    label: 'Disciplines per sport',
+    unit: 'discipline',
+    counts: 'Disciplines run under one sport in one championship',
   },
 } as const satisfies Record<string, LimitDef>;
 
@@ -57,6 +99,11 @@ export const LIMIT_KEYS = Object.keys(LIMITS) as LimitKey[];
 
 export function limitsFor(ladder: Ladder): LimitKey[] {
   return LIMIT_KEYS.filter((k) => LIMITS[k].ladder === ladder);
+}
+
+/** The ceilings counted over one scope - org ones are metered on the billing panel. */
+export function limitsIn(ladder: Ladder, scope: 'org' | 'event'): LimitKey[] {
+  return LIMIT_KEYS.filter((k) => LIMITS[k].ladder === ladder && LIMITS[k].scope === scope);
 }
 
 /** A plan's ceilings. `null` on a key means unlimited. */

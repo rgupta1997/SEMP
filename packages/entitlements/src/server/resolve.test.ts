@@ -109,7 +109,7 @@ describe('assertCapability', () => {
   it('throws a 403 naming the capability', async () => {
     const p = fakePrisma({ orgs: { iimb: 'pro' } });
     await expect(
-      assertCapability(p, 'multi_campus', { userId: 'u', organizationId: 'iimb' }),
+      assertCapability(p, 'audit_logs', { userId: 'u', organizationId: 'iimb' }),
     ).rejects.toThrow(CapabilityRequiredError);
 
     const err = await assertCapability(p, 'sso', { userId: 'u', organizationId: 'iimb' })

@@ -17,6 +17,8 @@ import {
 } from '../lib/billing';
 import { PlanComparison } from './PlanComparison';
 import { CheckoutModal } from './CheckoutModal';
+import { useAuth } from '../lib/auth';
+import { PlanChangeDialog } from './PlanChangeDialog';
 import {
   Badge, Button, Card, CardBody, Spinner, Table, TD, TH, THead, TR,
   cn, confirmDialog, toast,
@@ -43,6 +45,10 @@ export function PlanSurface({ ladder, statePath, actionPath }: PlanSurfaceProps)
   const state = useApi<BillingState>(statePath);
   const qc = useQueryClient();
   const [checkout, setCheckout] = useState<{ plan: PlanView; period: BillingPeriod } | null>(null);
+  // Platform admins can set the plan directly from here - no checkout, no invoice.
+  const isSuper = !!useAuth()?.ctx?.user?.is_super_admin;
+  const orgIdFromPath = ladder === 'org' ? /\/billing\/org\/([^/]+)/.exec(actionPath)?.[1] ?? null : null;
+  const [adminChange, setAdminChange] = useState(false);
 
   if (plans.isLoading || state.isLoading) return <Spinner label="Loading plans…" />;
   if (!plans.data || !state.data) return null;
@@ -136,6 +142,11 @@ export function PlanSurface({ ladder, statePath, actionPath }: PlanSurfaceProps)
               </div>
               {currentPlan && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{currentPlan.tagline}</p>
+              )}
+              {isSuper && orgIdFromPath && (
+                <Button size="sm" variant="outline" className="mt-3" onClick={() => setAdminChange(true)}>
+                  Change plan (platform admin)
+                </Button>
               )}
             </div>
 
@@ -287,6 +298,12 @@ export function PlanSurface({ ladder, statePath, actionPath }: PlanSurfaceProps)
           contactPath={ladder === 'org' ? `${actionPath}/contact` : undefined}
           onClose={() => setCheckout(null)}
           onDone={() => { setCheckout(null); refreshAll(); }}
+        />
+      )}
+      {adminChange && orgIdFromPath && (
+        <PlanChangeDialog
+          target={{ kind: 'org', id: orgIdFromPath, name: 'this organisation', current }}
+          onClose={() => { setAdminChange(false); refreshAll(); }}
         />
       )}
     </div>

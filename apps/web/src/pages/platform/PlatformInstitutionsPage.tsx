@@ -1,19 +1,25 @@
 import { useState } from 'react';
-import { Landmark, Pencil, Trash2 } from 'lucide-react';
+import { CreditCard, Landmark, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Badge, Button, Card, confirmDialog, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
+import { PlanChangeDialog } from '../../components/PlanChangeDialog';
+
+const PLAN_LABEL: Record<string, string> = { free: 'Free', starter: 'Starter', pro: 'Pro', max: 'Enterprise' };
+const PLAN_TONE: Record<string, 'slate' | 'teal' | 'brand' | 'violet'> = { free: 'slate', starter: 'teal', pro: 'brand', max: 'violet' };
 
 interface Organization {
   id: string; name: string; short_name?: string | null; code?: string | null;
   city?: string | null; country?: string | null; status?: boolean | null;
+  plan?: string | null;
 }
 
 export function PlatformInstitutionsPage() {
   const { data: organizations = [], isLoading } = useApi<Organization[]>('/organizations');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Organization | null>(null);
+  const [planFor, setPlanFor] = useState<Organization | null>(null);
 
   const del = useApiMutation((id: string) => api('DELETE', `/organizations/${id}`), ['/organizations']);
 
@@ -48,6 +54,7 @@ export function PlatformInstitutionsPage() {
                 <th className="px-4 py-2">Code</th>
                 <th className="px-4 py-2">City</th>
                 <th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2">Plan</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
@@ -58,7 +65,11 @@ export function PlatformInstitutionsPage() {
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{i.code || '-'}</td>
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{i.city || '-'}</td>
                   <td className="px-4 py-2">{i.status === false ? <Badge tone="rose">inactive</Badge> : <Badge tone="green">active</Badge>}</td>
+                  <td className="px-4 py-2"><Badge tone={PLAN_TONE[i.plan ?? 'free'] ?? 'slate'}>{PLAN_LABEL[i.plan ?? 'free'] ?? i.plan}</Badge></td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <Button size="sm" variant="ghost" onClick={() => setPlanFor(i)} aria-label={`Change plan for ${i.name}`} title="Change plan">
+                      <CreditCard size={14} />
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => setEditing(i)} aria-label={`Edit ${i.name}`} title="Edit">
                       <Pencil size={14} />
                     </Button>
@@ -76,6 +87,9 @@ export function PlatformInstitutionsPage() {
         </Card>
       )}
 
+      {planFor && (
+        <PlanChangeDialog target={{ kind: 'org', id: planFor.id, name: planFor.name, current: planFor.plan }} onClose={() => setPlanFor(null)} />
+      )}
       {creating && (
         <InstitutionFormModal
           onClose={() => setCreating(false)}

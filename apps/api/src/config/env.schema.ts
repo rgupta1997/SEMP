@@ -113,6 +113,19 @@ const schema = z.object({
   // Realtime, authorised by RLS. It reads Supabase's own WAL, so it cannot work on RDS.
   REALTIME_TRANSPORT: z.enum(['off', 'appsync', 'supabase']).default('off'),
 
+  // ---- payments (Razorpay) ---------------------------------------------------
+  //
+  // The same Sportagon Razorpay account the FMS uses. Checkout is ON only when the
+  // key id AND secret are both set; with either missing, buying a plan keeps the
+  // old behaviour (granted at once, invoice marked provider 'none').
+  // The key id is public - it is handed to the browser to open Razorpay Checkout.
+  // The webhook secret is the one entered on SEMP's OWN webhook in the Razorpay
+  // dashboard (not the FMS one); without it the webhook route answers 503 and
+  // settlement relies on the browser callback + the reconcile sweep.
+  RAZORPAY_KEY_ID: z.string().min(1).optional(),
+  RAZORPAY_KEY_SECRET: z.string().min(1).optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
+
   // Supabase Realtime, all three required when REALTIME_TRANSPORT=supabase. The URL
   // and publishable key are public (they reach the browser in the token response);
   // the JWT secret signs the browser's realtime token and never leaves the API.

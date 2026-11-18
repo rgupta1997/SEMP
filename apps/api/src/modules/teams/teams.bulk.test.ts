@@ -49,6 +49,8 @@ const prisma = {
     ],
   },
   championships: {
+    // The event-plan gate's read. Legacy = grandfathered, so no ceiling applies here.
+    findUnique: async () => ({ plan_tier: null, plan_source: 'legacy', plan_grace_until: null, host_organization_id: ORG, organizations: { plan: 'free' } }),
     findMany: async () => [
       { id: INTRA, name: 'Beta intra event', entry_level: 'department', entry_scope_unit_id: null, host_organization_id: ORG, organizations: { settings: {} } },
       { id: OPEN, name: 'Open cup', entry_level: 'organization', entry_scope_unit_id: null, host_organization_id: null, organizations: { settings: {} } },

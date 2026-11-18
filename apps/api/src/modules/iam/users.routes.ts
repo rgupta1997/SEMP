@@ -15,7 +15,7 @@ import { notify } from '@semp/notifications/server/notify.js';
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
   id: true, name: true, email: true, phone: true, is_active: true,
-  is_super_admin: true, organization_id: true, created_at: true,
+  is_super_admin: true, organization_id: true, created_at: true, personal_plan: true,
   organizations: { select: { id: true, name: true, short_name: true } },
 } as const;
 
