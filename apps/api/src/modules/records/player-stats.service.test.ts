@@ -339,3 +339,58 @@ describe('buildPlayerStatRows · who actually played', () => {
     expect(rows.find((r) => r.user_id === 'u2')!.stats.rank).toBe(1);
   });
 });
+
+// Final-score entry with stats: the scorers and cards are typed after the match into
+// live_state.manualEvents, in the live deck's own event shape, and must land on the
+// players' records exactly as tapped events would.
+describe('buildPlayerStatRows · stats typed with a final score', () => {
+  const squad: FixtureParticipants = {
+    resolved: [
+      { user_id: 'a1', team_id: 'tA', organization_id: 'oA', competitor_id: null, name: 'Aarav' },
+      { user_id: 'a2', team_id: 'tA', organization_id: 'oA', competitor_id: null, name: 'Kabir' },
+      { user_id: 'b1', team_id: 'tB', organization_id: 'oB', competitor_id: null, name: 'Rohan' },
+    ],
+    unmatched: [],
+  };
+  const football = (live_state: unknown) => fakeDb({
+    id: 'fx1', round: 'Match 1', stage_sequence: null, home_team_id: 'tA', away_team_id: 'tB',
+    live_state, lock_version: 1, scheduled_at: new Date('2026-11-19'),
+    winner_team_id: 'tA', home_score: 2, away_score: 0,
+    tournament_disciplines: {
+      disciplines: { name: 'Open', entry_type: 'team' },
+      tournament_sports: { sport_id: 'sp-fb', sports: { name: 'Football' } },
+    },
+  });
+  const stat = (r: Awaited<ReturnType<typeof buildPlayerStatRows>>, id: string) => r.find((x) => x.user_id === id)!.stats;
+
+  it('credits goals, assists, own goals and cards from the typed list', async () => {
+    const rows = await buildPlayerStatRows(football({
+      manualEvents: [
+        { t: 'point', side: 'A', pts: 1, kind: 'goal', playerId: 'a1', secondId: 'a2', minute: 12 },
+        // Rohan's own goal: the point is A's, the record is his.
+        { t: 'point', side: 'A', pts: 1, kind: 'own_goal', playerId: 'b1' },
+        { t: 'point', side: 'B', pts: 0, kind: 'yellow', playerId: 'b1', minute: 70 },
+      ],
+    }), 'fx1', squad);
+    expect(stat(rows, 'a1').goals).toBe(1);
+    expect(stat(rows, 'a2').assists).toBe(1);
+    expect(stat(rows, 'b1').own_goals).toBe(1);
+    expect(stat(rows, 'b1').yellows).toBe(1);
+  });
+
+  it('prefers the typed list over an older live log, so a switch to final-score entry wins', async () => {
+    const rows = await buildPlayerStatRows(football({
+      rally: [{ t: 'point', side: 'A', pts: 1, kind: 'goal', playerId: 'a2' }],
+      manualEvents: [{ t: 'point', side: 'A', pts: 1, kind: 'goal', playerId: 'a1' }],
+    }), 'fx1', squad);
+    expect(stat(rows, 'a1').goals).toBe(1);
+    expect(stat(rows, 'a2').goals).toBeUndefined();
+  });
+
+  it('still reads the live log when nothing was typed', async () => {
+    const rows = await buildPlayerStatRows(football({
+      rally: [{ t: 'point', side: 'A', pts: 1, kind: 'goal', playerId: 'a2' }],
+    }), 'fx1', squad);
+    expect(stat(rows, 'a2').goals).toBe(1);
+  });
+});

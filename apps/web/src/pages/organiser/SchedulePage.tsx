@@ -5,7 +5,7 @@ import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2, Users } from 'lucide-
 import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
-import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, isChessSport, isRankingSport, isScoredSport, type ScoringMode } from '@semp/shared';
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -333,9 +333,31 @@ function knockoutChoiceLabel(round: string): string {
 // A typed label that reads like a knockout round would be scored as a league match.
 const looksKnockout = (label: string) => /\b(final|semi|quarter|sf|qf|3rd|third)\b/i.test(label);
 
-function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, officials, teamName, onClose }:
-  { fixture: any | null; tdId: string; drawPath: string; sportName?: string; grounds: Ground[]; venues: Venue[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
+function FixtureModal({ fixture, tdId, drawConfig, drawPath, sportName, grounds, venues, officials, teamName, onClose }:
+  { fixture: any | null; tdId: string; drawConfig?: any; drawPath: string; sportName?: string; grounds: Ground[]; venues: Venue[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
   const isEdit = !!fixture;
+  const qc = useQueryClient();
+  const { eventId: drawEventId } = useParams();
+  // How this DRAW is scored - live play-by-play, or the final score plus player
+  // stats. One setting for every match in the draw; shown here because this is
+  // where the organiser is looking at a match. Ranking sports and chess have one
+  // way to score, so they get no choice.
+  const offersDepth = !!sportName && !isRankingSport(sportName) && !isChessSport(sportName);
+  const savedDepth: ScoringMode = drawConfig?.scoringDepth ?? drawConfig?.scoring?.scoringMode ?? 'detailed';
+  const [depth, setDepth] = useState<ScoringMode>(savedDepth);
+  const saveDepth = async () => {
+    if (!offersDepth || depth === savedDepth) return;
+    const cfg = (drawConfig ?? {}) as Record<string, any>;
+    await api('PATCH', `/tournament-disciplines/${tdId}`, {
+      format_config: {
+        ...cfg,
+        scoringDepth: depth,
+        // Kept in step, so nothing still reading the template's mode disagrees.
+        ...(cfg.scoring ? { scoring: { ...cfg.scoring, scoringMode: depth } } : {}),
+      },
+    });
+    await qc.invalidateQueries({ queryKey: [`/championships/${drawEventId}/draws`] });
+  };
   const { data: teams = [] } = useApi<any[]>(`/teams?tournament_discipline_id=${tdId}`);
   // Re-pairing, moving in the draw or deleting a match is "manual schedule
   // changes" - a plan capability. Time, venue, official and score stay editable.
@@ -414,6 +436,8 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
     if (status === 'walkover') body.winner_team_id = walkoverWinner === 'home' ? homeId || null : awayId || null;
     save.mutate(body, {
       onSuccess: async () => {
+        // The draw's scoring depth is the draw's, not this match's - its own endpoint.
+        try { await saveDepth(); } catch (e: any) { toast.error(`Fixture saved, but the scoring setting wasn’t: ${e.message}`); return; }
         // The format lives on its own endpoint (it clears the frozen snapshot and
         // refuses a locked card), so it is saved after the fixture rather than
         // smuggled into the same body.
@@ -455,7 +479,7 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
     // gamble on which locale the browser reports.
     return s.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
   };
-  const metaLine = [sportName, round.trim(), when ? fmtBannerTime(when) : null, venueLabel].filter(Boolean).join(' · ');
+  const metaLine = [sportName, round.trim(), when ? fmtBannerTime(when) : null, venueLabel, offersDepth ? (depth === 'manual' ? 'Normal scoring' : 'Detailed scoring') : null].filter(Boolean).join(' · ');
   const banner = isEdit ? (
     <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
       <div className="min-w-0">
@@ -559,6 +583,35 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
             </Field>
           </div>
         </div>
+
+        {offersDepth && (
+          <div className="mt-4">
+            <SectionLabel>Scoring</SectionLabel>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How this draw is scored">
+              {([
+                { v: 'detailed', title: 'Detailed scoring', body: 'Live, play by play on the match console: every point, goal and card as it happens.' },
+                { v: 'manual', title: 'Normal scoring', body: 'Enter the final score after the match, then add the stats - who scored, cards and the rest.' },
+              ] as const).map((o) => (
+                <button key={o.v} type="button" role="radio" aria-checked={depth === o.v} onClick={() => setDepth(o.v)}
+                  className={cn('rounded-xl border px-3 py-2.5 text-left transition',
+                    depth === o.v
+                      ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500 dark:bg-brand-500/10'
+                      : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600')}>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    <span className={cn('grid h-4 w-4 place-items-center rounded-full border', depth === o.v ? 'border-brand-600' : 'border-slate-300 dark:border-slate-600')}>
+                      {depth === o.v && <span className="h-2 w-2 rounded-full bg-brand-600" />}
+                    </span>
+                    {o.title}
+                  </div>
+                  <p className="mt-0.5 pl-6 text-xs text-slate-500 dark:text-slate-400">{o.body}</p>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              Applies to every match in this draw.{depth !== savedDepth && ' Matches already being scored keep their score: a live match moves to the final-score form with its scorers, and one whose score was typed in stays on the form.'}
+            </p>
+          </div>
+        )}
 
         <div className="mt-4">
           <SectionLabel>Match rules</SectionLabel>
@@ -1016,8 +1069,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
           </div>
         )}
       </div>
-      {editing && <FixtureModal fixture={editing} tdId={td.id} drawPath={fixturesPath} sportName={sportName} grounds={grounds} venues={venues} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
-      {creating && <FixtureModal fixture={null} tdId={td.id} drawPath={fixturesPath} sportName={sportName} grounds={grounds} venues={venues} officials={officials} teamName={teamName} onClose={() => setCreating(false)} />}
+      {editing && <FixtureModal fixture={editing} tdId={td.id} drawConfig={td.format_config} drawPath={fixturesPath} sportName={sportName} grounds={grounds} venues={venues} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
+      {creating && <FixtureModal fixture={null} tdId={td.id} drawConfig={td.format_config} drawPath={fixturesPath} sportName={sportName} grounds={grounds} venues={venues} officials={officials} teamName={teamName} onClose={() => setCreating(false)} />}
       {editingFormat && (
         <FormatPicker
           mode="edit"

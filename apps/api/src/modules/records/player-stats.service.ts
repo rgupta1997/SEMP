@@ -80,6 +80,21 @@ const rallyOf = (liveState: unknown): RallyLog => {
   return raw.filter((e): e is RallyEvent => !!e && typeof e === 'object' && typeof (e as RallyEvent).t === 'string');
 };
 
+/**
+ * The stats typed in beside a final score (`live_state.manualEvents`), when the
+ * match was recorded that way. Null when it never was.
+ *
+ * Present means AUTHORITATIVE for the attributed fold: the official either scored
+ * the whole match on the final-score form, or switched to it part-way - and the
+ * form seeds from the live log's attributed actions, so nothing tapped earlier is
+ * lost by preferring it. The live deck clears the key on its next tap.
+ */
+const manualEventsOf = (liveState: unknown): RallyLog | null => {
+  const raw = (liveState as { manualEvents?: unknown } | null)?.manualEvents;
+  if (!Array.isArray(raw)) return null;
+  return raw.filter((e): e is RallyEvent => !!e && typeof e === 'object' && (e as RallyEvent).t === 'point');
+};
+
 const firstServerOf = (liveState: unknown): Side =>
   ((liveState as { firstServer?: unknown } | null)?.firstServer === 'B' ? 'B' : 'A');
 
@@ -298,7 +313,7 @@ export async function buildPlayerStatRows(
     // The scoreline goes in too, because seven sports record no per-player actions
     // and their statistic IS the result. `roster` is everybody on the two team
     // sheets, so each of them gets a line rather than only whoever was tapped.
-    const derived = deriveTeamStats(sportName, log, {
+    const derived = deriveTeamStats(sportName, manualEventsOf(fx.live_state) ?? log, {
       sideOf,
       result: { home: fx.home_score, away: fx.away_score, winner: winnerSide() },
       roster: people.map((p) => ({ userId: p.user_id, side: sideOf.get(p.user_id)! })),
