@@ -95,10 +95,15 @@ export function buildApp(prisma: Prisma) {
   // Allow any localhost origin in dev (Vite may pick 5173/5174/...), plus an
   // explicit production allowlist. WEB_ORIGIN may be a comma-separated list so the
   // same backend can serve, e.g., the Netlify site and a custom domain.
+  //
+  // The Android app (Capacitor) loads its bundle from the device and calls the API
+  // from the fixed origin `https://localhost`, so that one is always allowed too.
+  // Auth is a bearer token, not a cookie, so allowing it exposes nothing extra.
   const allowedOrigins = env.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  const nativeAppOrigins = ['https://localhost', 'capacitor://localhost'];
   app.use(cors({
     origin: (origin, cb) => {
-      if (!origin || /^http:\/\/localhost:\d+$/.test(origin) || allowedOrigins.includes(origin)) cb(null, true);
+      if (!origin || /^http:\/\/localhost:\d+$/.test(origin) || nativeAppOrigins.includes(origin) || allowedOrigins.includes(origin)) cb(null, true);
       else cb(new Error('Not allowed by CORS'));
     },
   }));

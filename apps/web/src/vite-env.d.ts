@@ -18,6 +18,9 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   /** Marketing site origin. Falls back to '/' at its two call sites. */
   readonly VITE_LANDING_URL?: string;
+  /** Android app builds only: the public website origin that share/verify links
+   *  point at (inside the APK the page origin is https://localhost). */
+  readonly VITE_PUBLIC_WEB_URL?: string;
 }
 
 interface ImportMeta {

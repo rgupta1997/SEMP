@@ -7,6 +7,7 @@ import { useWorkspace } from '../../../lib/useWorkspace';
 import { useOrgArchived } from '../../../lib/useOrgArchived';
 import { GenerateModal } from './GenerateModal';
 import { KpiTile, whenish, type Delta, type Template } from './shared';
+import { openPublic } from '../../../lib/native';
 
 // The Certificates Manager landing screen.
 //
@@ -59,7 +60,7 @@ export function CertificatesDashboard() {
         subtitle="Issue, withdraw and verify - every one carries a signature a stranger can check."
       >
         {SHOW_QR_VERIFIER && (
-          <Button variant="ghost" onClick={() => window.open('/verify', '_blank', 'noopener')}>
+          <Button variant="ghost" onClick={() => openPublic('/verify')}>
             <ScanLine size={15} aria-hidden />QR verifier
           </Button>
         )}

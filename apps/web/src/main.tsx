@@ -11,7 +11,10 @@ import { useAuth } from './lib/auth';
 import { notificationTransport } from './lib/realtime';
 import { notificationHooks } from './lib/notification';
 import { App } from './App';
+import { initNative } from './lib/native';
 import './index.css';
+
+void initNative();
 
 const queryClient = new QueryClient({
   defaultOptions: {

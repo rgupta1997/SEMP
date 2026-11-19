@@ -7,9 +7,19 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "android:sync:beta": "vite build --mode android-beta && cap sync android",
+    "android:sync:uat": "vite build --mode android-uat && cap sync android",
+    "android:apk": "cd android && gradlew.bat assembleDebug",
+    "android:release": "cd android && gradlew.bat bundleRelease assembleRelease",
+    "android:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "7.6.10",
+    "@capacitor/app": "^7.1.0",
+    "@capacitor/core": "7.6.10",
+    "@capacitor/splash-screen": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0",
     "@semp/notifications": "^0.0.0",
     "@semp/shared": "*",
     "@supabase/supabase-js": "^2.117.3",
@@ -24,6 +34,7 @@
     "xlsx": "=0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "7.6.10",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^18.3.12",

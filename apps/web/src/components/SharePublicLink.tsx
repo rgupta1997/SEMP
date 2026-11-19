@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
+import { publicUrl } from '../lib/native';
 import { Button, toast } from './ui';
 import { LockMark, useEventPlan } from '../lib/eventPlan';
 
@@ -12,7 +13,7 @@ export function SharePublicLink({ eventId, className }: { eventId: string; class
     setBusy(true);
     try {
       const { token } = await api<{ token: string }>('GET', `/championships/${eventId}/share-link`);
-      const url = `${window.location.origin}/c/${token}`;
+      const url = publicUrl(`/c/${token}`);
       try {
         await navigator.clipboard.writeText(url);
         toast.success('Public link copied', url);
