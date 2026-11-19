@@ -247,7 +247,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
           ) : showBracket ? (
             <Card className="p-3 sm:p-4">
               {/* Read-only: no onSelect / onScore, so nothing in it can be edited. */}
-              <Bracket fixtures={knockout} teamName={bracketTeamName} teamOrg={bracketTeamOrg} />
+              <Bracket fixtures={knockout} sportName={g.sport} teamName={bracketTeamName} teamOrg={bracketTeamOrg} />
             </Card>
           ) : g.rows.map((f) => {
             const scored = f.home_score != null && f.away_score != null;

@@ -116,6 +116,10 @@ export function EventLayout() {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
+  // Schedule and Results open straight on their content: back, status and the
+  // lifecycle button stay on the other event pages.
+  const bareHeader = segment === 'schedule' || segment === 'results';
+
   // An archived event is read-only; no lifecycle step is offered until it is retrieved.
   const archivedAt = championship.archived_at ?? null;
   const next = archivedAt ? null : NEXT_STATUS[championship.status];
@@ -176,7 +180,7 @@ export function EventLayout() {
           </Button>
         )}
       </div>
-      ) : (
+      ) : bareHeader ? null : (
       // Every other page: the NAME is in the top bar (usePageTitle), and what stays is
       // one line - back, status, where and when, and the lifecycle action.
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">

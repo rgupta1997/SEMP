@@ -1,17 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2, Users } from 'lucide-react';
+import { CalendarRange, ClipboardList, ClipboardPen, Eye, LayoutList, Pencil, Trash2 } from 'lucide-react';
 import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { ARCHIVED_READ_ONLY_MESSAGE, isChessSport, isRankingSport, isScoredSport, type ScoringMode } from '@semp/shared';
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
-import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, SearchableSelect, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
-import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
-import { FitName } from '../../components/FitName';
+import { useApi, useApiMutation } from '../../lib/hooks';
+import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusLegend, toast } from '../../components/ui';
+import { BackToTop } from '../../components/BackToTop';
+import { Bracket } from '../../components/Bracket';
 import { openTieCount, tablesPath, TABLES_REFRESH_MS, type DrawTables } from '../../components/GroupTables';
 import { useUrlState } from '../../components/primitives';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
@@ -20,6 +20,7 @@ import { StageConfigWizard } from '../../components/StageConfigWizard';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
 import { isPoolShapedFormat, titleCase } from '../../lib/format';
 import { LockMark, useEventPlan } from '../../lib/eventPlan';
+import { AllPlayedPill, countPhases, DrawSteps, EventPulse, MatchCard, matchPhase, ProgressRing, realMatch, SportChips, sortByCategory, TeamChips, ViewTabs, type CardSide, type PhaseFilter, type TeamSide } from '../../features/schedule/ScheduleParts';
 
 /**
  * The scoring entry point, on Schedule.
@@ -35,57 +36,8 @@ import { LockMark, useEventPlan } from '../../lib/eventPlan';
  * The console handles the transition itself - the first scoring action moves a
  * `scheduled` fixture to `live` - so this only has to open it.
  */
-/** A fixture row's status badge and score button, a size smaller on a phone. */
-const PHONE_BADGE = 'max-sm:px-2 max-sm:py-0.5 max-sm:text-[10px]';
+/** A fixture row's score button, a size smaller on a phone. */
 const PHONE_ICON_BUTTON = 'max-sm:h-7 max-sm:min-h-0 max-sm:w-7 max-sm:px-0 max-sm:py-0';
-
-/** One side of a fixture row: a team (fitted name) or an empty slot's label. */
-interface PairSide {
-  full: string | null;
-  short?: string | null;
-  /** Shown when there is no team yet - "Winner of QF1", TBD, or a blocked-tie warning. */
-  slotLabel: string;
-  org: string;
-  blocked?: boolean;
-  title?: string;
-}
-
-/**
- * Home vs away with "vs" between equal columns. The two names switch to short codes
- * TOGETHER - one side "ISFM" and the other a full name read as a lopsided row.
- */
-function MatchPair({ home, away }: { home: PairSide; away: PairSide }) {
-  const [homeFits, setHomeFits] = useState(true);
-  const [awayFits, setAwayFits] = useState(true);
-  const shortBoth = !homeFits || !awayFits;
-  const cell = (s: PairSide, align: 'left' | 'right', onFit: (v: boolean) => void) => (
-    <div className={cn('min-w-0', align === 'right' ? 'text-right' : 'text-left', s.blocked && 'text-amber-600 dark:text-amber-400')}>
-      {s.full ? (
-        <>
-          {/* From sm: the full name on one line in its half of the match area (80% of
-              the row), wrapping only when it is genuinely longer than that. */}
-          <span className="hidden break-words leading-tight sm:block">{s.full}</span>
-          {/* Phone: short code + the full name tiny beneath, when it will not fit. */}
-          <div className="sm:hidden">
-            <FitName full={s.full} short={s.short} align={align} fullBelow belowClassName="text-[10px]" className="leading-tight"
-              forceShort={shortBoth} onFitChange={onFit} />
-          </div>
-        </>
-      ) : <span className="block truncate leading-tight" title={s.title}>{s.slotLabel}</span>}
-      {s.org && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{s.org}</span>}
-    </div>
-  );
-  return (
-    // Stacked row: the match spans 80% of the row, centred. One-line row: it fills its
-    // middle column. Either way long names get the room rather than a narrow column.
-    <div className="mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 font-medium text-slate-700 dark:text-slate-300 sm:w-4/5 @min-[46rem]:w-full">
-
-      {cell(home, 'right', setHomeFits)}
-      <span className="pt-px text-slate-400 dark:text-slate-500">vs</span>
-      {cell(away, 'left', setAwayFits)}
-    </div>
-  );
-}
 
 function ScoreButton({ fixture, sportName, onNavigate, iconOnPhone = false }: { fixture: any; sportName?: string; onNavigate?: () => void; iconOnPhone?: boolean }) {
   const navigate = useNavigate();
@@ -729,12 +681,17 @@ const sortTeamsForPicker = (teams: any[]) => [...teams].sort((a, b) =>
   teamPickLabel(a).localeCompare(teamPickLabel(b), undefined, { sensitivity: 'base', numeric: true }));
 
 /** A fixture the given team plays in. */
-const involves = (f: any, teamId: string) => f.home_team_id === teamId || f.away_team_id === teamId;
+/** The picked team or institute, as the squad ids it covers; null shows everyone. */
+type TeamPick = Set<string> | null;
+const involves = (f: any, pick: TeamPick) => !pick || pick.has(f.home_team_id) || pick.has(f.away_team_id);
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamFilter = '' }:
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamPick = null, phaseFilter = '', onTimeline }:
   { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean;
     /** Show only this team's matches. Display only - generate/regenerate still see the whole draw. */
-    teamFilter?: string }) {
+    teamPick?: TeamPick;
+    /** Show only matches in this phase (the pulse tiles). Display only, like teamPick. */
+    phaseFilter?: PhaseFilter;
+    onTimeline: () => void }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -746,9 +703,11 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
     const ta = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity;
     const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
-  }).filter((f) => !isGroupBye(f) && (!teamFilter || involves(f, teamFilter)));
+  }).filter((f) => !isGroupBye(f) && involves(f, teamPick) && (!phaseFilter || matchPhase(f) === phaseFilter));
   // Matches actually played: a group's rest slots are not one.
   const matchCount = fixtures.filter((f) => !isGroupBye(f)).length;
+  const phases = countPhases(fixtures);
+  const playable = phases.live + phases.upcoming + phases.unscheduled + phases.done;
   // Team NAMES come from a separate, championship-wide query (teamsPath) - generating
   // a draw only invalidates the fixtures themselves, and a fixture's home/away team_id
   // is real the instant it's created. Rendering it before that other query has ever
@@ -817,7 +776,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   // groups) shows a results grid. Both are the "visual" view.
   const visualLabel = hasBracket ? 'Bracket' : 'Grid';
   // A bracket / grid needs the whole draw, so a team filter shows the list instead.
-  const showVisual = !isRanking && fixtures.length > 0 && view === 'visual' && !teamFilter;
+  const showVisual = !isRanking && fixtures.length > 0 && view === 'visual' && !teamPick && !phaseFilter;
   // League / group tables, with ties the tie-breakers left for a hand-picked order.
   const hasTables = !isRanking && fixtures.some((f) => !isKnockoutRound(f.round));
   const { data: drawTables } = useApi<DrawTables>(hasTables ? tablesPath(td.id) : null, true, { refetchInterval: TABLES_REFRESH_MS });
@@ -893,17 +852,24 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   return (
     <Card className="min-w-0 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{td.disciplines?.name ?? sportName}</span>
-            {formatLabel && <Badge tone="violet">{formatLabel}</Badge>}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {playable > 0 && phases.done < playable && <ProgressRing done={phases.done} live={phases.live} total={playable} />}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-base font-bold text-slate-900 dark:text-slate-100">{td.disciplines?.name ?? sportName}</span>
+              {formatLabel && <Badge tone="violet">{formatLabel}</Badge>}
+              {playable > 0 && phases.done === playable && <AllPlayedPill />}
+              {phases.live > 0 && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">{phases.live} live</span>}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {titleCase(td.entry_type)} draw · {matchCount} match{matchCount === 1 ? '' : 'es'}{playable > 0 && ` · ${phases.done} played`}
+            </div>
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{titleCase(td.entry_type)} Draw · {matchCount} fixture{matchCount === 1 ? '' : 's'}</div>
         </div>
         {/* Wraps: five controls do not fit one line on a narrow phone (Regenerate ran off
             the card). Under 427px every button is also tightened so they fit one line. */}
         <div className="flex flex-wrap items-center gap-2 max-[427px]:gap-1.5 max-[427px]:[&_button]:min-h-0 max-[427px]:[&_button]:px-2 max-[427px]:[&_button]:py-1.5 max-[427px]:[&_button]:text-[11px]">
-          {fixtures.length > 0 && !isRanking && !teamFilter && (
+          {fixtures.length > 0 && !isRanking && !teamPick && !phaseFilter && (
             <Segmented
               size="sm"
               value={view}
@@ -958,6 +924,10 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         </div>
       </div>
       <div className="mt-3">
+        {canManage && !archived && !isLoading && !phaseFilter && !(fixtures.length > 0 && phases.done === playable && playable > 0) && (
+          <DrawSteps hasFixtures={fixtures.length > 0} unscheduled={phases.unscheduled} live={phases.live}
+            done={phases.done} total={playable} onTimeline={onTimeline} />
+        )}
         {canManage && knockoutPending && !hasPlayed && !archived && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
             <span>The {isLeague ? 'league' : 'group'} stage is set up. Next, add the knockout and choose how many teams advance.</span>
@@ -972,30 +942,25 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
           </div>
         )}
         {isLoading ? <Spinner /> : fixtures.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">
-            {isRanking ? 'No event yet - generate to create the ranking event.' : 'No fixtures yet - generate the draw from registered teams.'}
-          </p>
+          <div className="flex items-center gap-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            <span className="text-2xl" aria-hidden>🏟️</span>
+            <span>{isRanking
+              ? 'No event yet. Generate it to create the ranking event.'
+              : canManage ? 'No matches yet. Use the button above to generate the draw from the registered teams.' : 'The draw for this category has not been made yet.'}</span>
+          </div>
         ) : isRanking ? (
           // Ranking event: one team-less fixture per draw - show the event (discipline)
           // name and its schedule/status rather than a head-to-head matchup.
-          <div className="space-y-1.5">
+          <div className="@container space-y-2">
             {listFixtures.map((f) => (
-              <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
-                <span className="w-20 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{f.round || 'Event'}</span>
-                <span className="flex-1 min-w-[180px] font-medium text-slate-700 dark:text-slate-300">{td.disciplines?.name ?? sportName} · Ranking event</span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
-                  {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
-                </span>
-                {/* Status + Edit share one row on phone, split 50/50 (status left,
-                    Edit right) so they line up across rows regardless of name length;
-                    from sm up they fall back to the inline end-of-row layout. */}
-                <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
-                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} className={PHONE_BADGE} />
-                  {canManage && <ScoreButton fixture={f} sportName={sportName} iconOnPhone />}
-                  {canManage && <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>}
-                </div>
-              </div>
+              <MatchCard key={f.id} f={f} sportName={sportName} eventTitle={td.disciplines?.name ?? sportName}
+                ground={groundLabel(f.venue_ground_id)} official={officialName(f.official_id)} canManage={canManage}
+                actions={canManage && (
+                  <>
+                    <ScoreButton fixture={f} sportName={sportName} iconOnPhone />
+                    <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>
+                  </>
+                )} />
             ))}
           </div>
         ) : showVisual ? (
@@ -1003,7 +968,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
             {stageGroups.map(([seq, group]) => {
               const groupHasBracket = group.some((f) => f.bracket_position != null);
               const content = groupHasBracket
-                ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg}
+                ? <Bracket fixtures={group} sportName={sportName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg}
                     onSelect={canManage && !archived ? setEditing : () => {}}
                     onScore={canManage ? (f: any) => goScore(f) : undefined} />
                 : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} teamShort={teamShort} onSelect={canManage && !archived ? setEditing : () => {}} />;
@@ -1026,11 +991,11 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
           </div>
         ) : (
           // Sized by the CARD (sidebar and display scaling change it), not the screen.
-          <div className="@container space-y-1.5">
+          <div className="@container space-y-2">
             {listFixtures.map((f) => {
               // One side of the match: a team, or an empty slot saying what fills it
               // (or why it is blocked).
-              const side = (s: 'home' | 'away'): PairSide => {
+              const side = (s: 'home' | 'away'): CardSide => {
                 const teamId = s === 'home' ? f.home_team_id : f.away_team_id;
                 const slot = s === 'home' ? f.home_slot_label : f.away_slot_label;
                 const blocked = !teamId && isTieBlockedFor(slot, f.live_state?.tie_blocked);
@@ -1042,30 +1007,23 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                   org: teamOrg(teamId),
                   blocked,
                   title: why,
+                  id: teamId,
                 };
               };
               return (
-                // Card 46rem+: ONE row - round | match | badge + buttons - with the side
-                // columns equal (so "vs" is centred in every row) and never under 14.5rem,
-                // the room "Completed + Scorecard + edit" needs. Narrower cards stack:
-                // round + badge on top, the match beneath - nothing can overlap.
-                <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60 @min-[46rem]:py-3.5 @min-[46rem]:grid @min-[46rem]:grid-cols-[minmax(14.5rem,1fr)_minmax(0,2fr)_minmax(14.5rem,1fr)]">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{f.round || 'Match'}</span>
-                  <div className="order-last min-w-0 basis-full @min-[46rem]:order-none @min-[46rem]:basis-auto">
-                    <MatchPair home={side('home')} away={side('away')} />
-                    <p className="mt-1 truncate text-center text-xs text-slate-500 dark:text-slate-400">
-                      {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
-                      {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
-                    </p>
-                  </div>
-                  <div className="ml-auto flex items-center justify-end gap-1.5 sm:gap-2 @min-[46rem]:ml-0">
-                    <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} className={PHONE_BADGE} />
-                    {canManage && <ScoreButton fixture={f} sportName={sportName} iconOnPhone />}
-                    {canManage && <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>}
-                  </div>
-                </div>
+                <MatchCard key={f.id} f={f} sportName={sportName} home={side('home')} away={side('away')}
+                  ground={groundLabel(f.venue_ground_id)} official={officialName(f.official_id)} canManage={canManage}
+                  actions={canManage && (
+                    <>
+                      <ScoreButton fixture={f} sportName={sportName} iconOnPhone />
+                      <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>
+                    </>
+                  )} />
               );
             })}
+            {listFixtures.length === 0 && (
+              <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:bg-slate-800/50 dark:text-slate-400">No matches in this category match the filter.</p>
+            )}
           </div>
         )}
       </div>
@@ -1122,20 +1080,54 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   );
 }
 
-function SportBlock({ ts, draws: allSportDraws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamFilter = '' }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; teamFilter?: string }) {
-  // With a team picked, only the draws it actually plays in.
-  const draws = teamFilter
-    ? allSportDraws.filter((td) => allFixtures.some((f) => f.tournament_discipline_id === td.id && involves(f, teamFilter)))
-    : allSportDraws;
+function SportBlock({ ts, draws: allSportDraws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, sportIcon, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamPick = null, phaseFilter = '', onTimeline }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; sportIcon?: string | null; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; teamPick?: TeamPick; phaseFilter?: PhaseFilter; onTimeline: () => void }) {
+  // With a team or phase picked, only the draws that have such a match. Ordered
+  // Men > Women > Mixed > the rest, so every sport opens on the same category.
+  const draws = sortDraws(allSportDraws).filter((td) => (!teamPick && !phaseFilter) || allFixtures.some((f) =>
+    f.tournament_discipline_id === td.id && realMatch(f)
+    && involves(f, teamPick) && (!phaseFilter || matchPhase(f) === phaseFilter)));
+  // Several categories (Men's / Women's / Mixed) share ONE card, switched by tabs.
+  const [pickedDraw, setPickedDraw] = useState('');
   if (draws.length === 0) return null;
+  const shown = draws.find((d) => d.id === pickedDraw) ?? draws[0];
+  const liveIn = (drawId: string) => allFixtures.filter((f) => f.tournament_discipline_id === drawId && f.status === 'live').length;
+  const sportFixtures = allFixtures.filter((f) => allSportDraws.some((td) => td.id === f.tournament_discipline_id));
+  const c = countPhases(sportFixtures);
+  const total = c.live + c.upcoming + c.unscheduled + c.done;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
   return (
-    <div>
-      <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{sportName}</h3>
+    <section id={`sport-${ts.sport_id}`} className="scroll-mt-24">
+      <div className="mb-3 flex items-center gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 text-2xl shadow-sm ring-1 ring-brand-200/60 dark:from-brand-500/15 dark:to-brand-500/5 dark:ring-brand-500/20" aria-hidden>
+          {sportIcon || '🏅'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">{sportName}</h3>
+          <div className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400">
+            <span>{allSportDraws.length} categor{allSportDraws.length === 1 ? 'y' : 'ies'}</span>
+            <span aria-hidden>·</span>
+            <span>{total} match{total === 1 ? '' : 'es'}</span>
+            {c.live > 0 && <><span aria-hidden>·</span><span className="font-bold text-rose-600 dark:text-rose-300">{c.live} live</span></>}
+            {total > 0 && <><span aria-hidden>·</span><span>{Math.round((c.done / total) * 100)}% done</span></>}
+          </div>
+        </div>
+      </div>
+      {draws.length > 1 && (
+        <div className="-mx-1 mb-3 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+          <ViewTabs value={shown.id} onChange={setPickedDraw}
+            options={draws.map((d) => {
+              const live = liveIn(d.id);
+              return {
+                value: d.id, label: d.disciplines?.name ?? sportName,
+                badge: live > 0 ? <span className="ml-1 rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{live}</span> : undefined,
+              };
+            })} />
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3">
-        {draws.map((td) => (
+        {[shown].map((td) => (
           <DrawCard
             key={td.id}
             td={td}
@@ -1153,13 +1145,17 @@ function SportBlock({ ts, draws: allSportDraws, allFixtures, fixturesLoading, te
             venues={venues}
             officials={officials}
             canManage={canManage}
-            teamFilter={teamFilter}
+            teamPick={teamPick}
+            phaseFilter={phaseFilter}
+            onTimeline={onTimeline}
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
+
+const sortDraws = (list: any[]) => sortByCategory(list, (d) => d.disciplines?.name ?? '');
 
 // Local day keys (YYYY-MM-DD) across the championship's date range.
 function buildDays(startISO?: string, endISO?: string): string[] {
@@ -1260,17 +1256,16 @@ export function SchedulePage() {
   // here, so no championship dropdown). Tournament is single-select - the manage view
   // always shows one tournament's draws - so it's registered as required (no "All").
   const tournamentOptions = tournaments.map((t: any) => ({ id: t.id, name: t.name }));
-  const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
   // Only when there's a choice - a lone tournament's dropdown looked like a dead event
   // switcher. Hidden, the page falls back to that tournament (`active` above).
-  const { sportId } = usePageFilters({
+  // Sport is the page's own multi-select chips now (the header holds one sport only).
+  usePageFilters({
     tournaments: topView === 'manage' && tournamentOptions.length > 1 ? tournamentOptions : undefined,
     tournamentRequired: true,
-    sports: sportOptions.length ? sportOptions : undefined,
   });
-  const visibleTsports = sportId ? tsports.filter((ts) => ts.sport_id === sportId) : tsports;
+  const [sportParam, setSportParam] = useUrlState<string>('sport', '');
+  const pickedSports = useMemo(() => (sportParam ? sportParam.split(',') : []), [sportParam]);
+  const visibleTsports = pickedSports.length ? tsports.filter((ts) => pickedSports.includes(ts.sport_id)) : tsports;
 
   // Team filter: only teams that actually play a match here, A–Z. In the URL so
   // opening a match and pressing Back keeps it.
@@ -1279,8 +1274,57 @@ export function SchedulePage() {
     const inPlay = new Set(allFixtures.flatMap((f: any) => [f.home_team_id, f.away_team_id]).filter(Boolean));
     return sortTeamsForPicker(teams.filter((t) => inPlay.has(t.id)));
   }, [allFixtures, teams]);
-  const teamHasMatch = !teamFilter || visibleTsports.some((ts) => allDraws.some((d) => d.tournament_sport_id === ts.id
-    && allFixtures.some((f: any) => f.tournament_discipline_id === d.id && involves(f, teamFilter))));
+
+  // Institute chips: every squad an institute (or, in an intra event, a batch) fields,
+  // so one tap shows all its matches across sports. In the URL like the team.
+  const [sideFilter, setSideFilter] = useUrlState<string>('side', '');
+  const sides = useMemo(() => {
+    const map = new Map<string, TeamSide>();
+    for (const t of teamOptions) {
+      const key = t.org_unit_id ? `u:${t.org_unit_id}` : t.organization_id ? `o:${t.organization_id}` : `t:${t.id}`;
+      const label = t.org_units?.code || t.org_units?.name || t.organizations?.short_name || t.organizations?.name || t.short_name || t.name;
+      const full = t.org_units?.name || t.organizations?.name || t.name;
+      const s = map.get(key) ?? { key, label, full, logo: t.org_unit_id ? null : t.organizations?.logo_url ?? null, ids: new Set<string>(), matches: 0, live: 0 };
+      s.ids.add(t.id);
+      map.set(key, s);
+    }
+    for (const f of allFixtures) {
+      if (!realMatch(f)) continue;
+      for (const s of map.values()) {
+        if (s.ids.has(f.home_team_id) || s.ids.has(f.away_team_id)) { s.matches += 1; if (f.status === 'live') s.live += 1; }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }));
+  }, [teamOptions, allFixtures]);
+  // A picked squad narrows further than a picked institute.
+  const teamPick: TeamPick = useMemo(() => (teamFilter ? new Set([teamFilter])
+    : sideFilter ? sides.find((s) => s.key === sideFilter)?.ids ?? null : null), [teamFilter, sideFilter, sides]);
+  const pickedSide = sides.find((s) => s.key === sideFilter);
+  const teamHasMatch = !teamPick || visibleTsports.some((ts) => allDraws.some((d) => d.tournament_sport_id === ts.id
+    && allFixtures.some((f: any) => f.tournament_discipline_id === d.id && involves(f, teamPick))));
+
+  // The pulse tiles' filter. In the URL, like the team, so Back from a match keeps it.
+  const [phaseRaw, setPhaseFilter] = useUrlState<string>('show', '');
+  const phaseFilter = (['live', 'upcoming', 'unscheduled', 'done'].includes(phaseRaw) ? phaseRaw : '') as PhaseFilter;
+  const sportIcon = (id: string) => sports.find((s) => s.id === id)?.icon ?? null;
+  // Everything the pulse and live strip count: the visible sports, and the picked team.
+  const scope = useMemo(() => {
+    const drawSport = new Map<string, any>();
+    for (const ts of visibleTsports) for (const d of allDraws) if (d.tournament_sport_id === ts.id) drawSport.set(d.id, { ts, d });
+    return allFixtures.filter((f: any) => drawSport.has(f.tournament_discipline_id) && realMatch(f) && involves(f, teamPick))
+      .map((f: any) => ({ f, ...drawSport.get(f.tournament_discipline_id) }));
+  }, [allFixtures, allDraws, visibleTsports, teamPick]);
+  const pulseCounts = countPhases(scope.map((s) => s.f));
+  const phaseHasMatch = !phaseFilter || pulseCounts[phaseFilter] > 0;
+  // Every sport gets a chip (not just the picked one), counted within the team filter.
+  const chipSports = tsports.map((ts) => {
+    const drawIds = new Set(allDraws.filter((d) => d.tournament_sport_id === ts.id).map((d) => d.id));
+    const mine = allFixtures.filter((f: any) => drawIds.has(f.tournament_discipline_id) && realMatch(f) && involves(f, teamPick));
+    return { id: ts.sport_id, name: sportName(ts.sport_id), icon: sportIcon(ts.sport_id), live: mine.filter((f: any) => f.status === 'live').length, total: mine.length };
+  })
+    // With a team picked, a sport it never plays is just noise.
+    .filter((c) => !teamPick || c.total > 0 || pickedSports.includes(c.id))
+    .sort((a, b) => b.live - a.live || a.name.localeCompare(b.name));
 
   if (tournamentsLoading) {
     return <div className="grid h-40 place-items-center"><Spinner /></div>;
@@ -1289,36 +1333,38 @@ export function SchedulePage() {
     return <EmptyState icon="⚑" title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
   }
 
+  // The picked institute's squads, with their sport and match counts, for the squad chips.
+  const squadChips = pickedSide ? teamOptions.filter((t) => pickedSide.ids.has(t.id)).map((t) => {
+    const mine = allFixtures.filter((f: any) => realMatch(f) && (f.home_team_id === t.id || f.away_team_id === t.id));
+    // The institute is already picked, so "IIMB Football Men's" reads "Football Men's".
+    const name = t.name.startsWith(pickedSide.label + ' ') ? t.name.slice(pickedSide.label.length + 1) : t.name;
+    return { id: t.id, name, icon: t.sports?.icon ?? sportIcon(t.sport_id), live: mine.filter((f: any) => f.status === 'live').length, total: mine.length };
+  }).sort((a, b) => a.name.localeCompare(b.name)) : [];
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-4">
-        <Segmented
+        <ViewTabs
           value={topView}
           onChange={setTopView}
-          options={[{ value: 'manage', label: 'Fixtures' }, { value: 'timeline', label: 'Timeline' }]}
+          options={[{ value: 'manage', label: 'Fixtures', icon: LayoutList }, { value: 'timeline', label: 'Timeline', icon: CalendarRange }]}
         />
-        {/* A compact filter, the height of the switch beside it; tinted while a team is
-            picked, so a filtered list never passes for the whole schedule. */}
-        {/* Searchable: a long team list is narrowed by typing, not scrolled. */}
-        {topView === 'manage' && teamOptions.length > 0 && (
-          <div className={cn('min-w-0 max-sm:flex-1 sm:ml-auto sm:w-64',
-            // `!` because cn() only joins: the trigger's own padding/colours must lose.
-            '[&>div>button]:!py-1.5 [&>div>button]:text-sm',
-            teamFilter && '[&>div>button]:!border-brand-300 [&>div>button]:!bg-brand-50 [&>div>button]:font-semibold [&>div>button]:!text-brand-700 dark:[&>div>button]:!border-brand-500/40 dark:[&>div>button]:!bg-brand-500/10 dark:[&>div>button]:!text-brand-300')}>
-            <SearchableSelect
-              className="w-full"
-              value={teamFilter}
-              onChange={setTeamFilter}
-              searchPlaceholder="Search teams…"
-              emptyLabel="No team matches"
-              options={[
-                { id: '', label: 'All teams', icon: <Users size={14} aria-hidden /> },
-                ...teamOptions.map((t) => ({ id: t.id, label: teamPickLabel(t) })),
-              ]}
-            />
-          </div>
-        )}
       </div>
+      {topView === 'manage' && (
+        <div className="mb-4">
+          <TeamChips sides={sides} value={sideFilter} onChange={(k) => { setSideFilter(k); setTeamFilter(''); }} />
+          {/* Squads appear once an institute is picked: two taps to any squad, no dropdown. */}
+          {pickedSide && (
+            <div className="mt-3">
+              <SportChips label="Filter by squad" allLabel={`All ${pickedSide.label} squads`} allIcon="👥" minItems={2}
+                sports={squadChips} value={teamFilter ? [teamFilter] : []}
+                // One squad at a time: the newly tapped one wins, tapping it again clears.
+                onChange={(ids) => setTeamFilter(ids.find((i) => i !== teamFilter) ?? '')} />
+            </div>
+          )}
+        </div>
+      )}
+      <BackToTop />
       {topView === 'timeline' ? (
         fixturesLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
           <div className="space-y-3">
@@ -1341,10 +1387,18 @@ export function SchedulePage() {
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : !teamHasMatch ? (
         <EmptyState icon="⚑" title="No matches for this team" description="Pick another team, or a different sport."
-          action={<Button variant="outline" onClick={() => setTeamFilter('')}>Show all teams</Button>} />
+          action={<Button variant="outline" onClick={() => { setTeamFilter(''); setSideFilter(''); }}>Show all teams</Button>} />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManageSport(ts.sport_id)} teamFilter={teamFilter} />)}
+          {/* Not "0 of 0 played" while the fixtures are still on their way. */}
+          {fixturesLoading
+            ? <div className="grid h-36 place-items-center rounded-2xl bg-slate-50 dark:bg-slate-800/40"><Spinner /></div>
+            : <EventPulse title={teamFilter ? `${teamName(teamFilter)} · matches` : pickedSide ? `${pickedSide.full} · matches` : 'Event progress'} counts={pulseCounts} value={phaseFilter} onChange={setPhaseFilter} />}
+          <SportChips sports={chipSports} value={pickedSports} onChange={(ids) => setSportParam(ids.join(','))} />
+          {!phaseHasMatch ? (
+            <EmptyState icon="🏁" title="Nothing here right now" description="No matches are in this state. Pick another tile, or show everything."
+              action={<Button variant="outline" onClick={() => setPhaseFilter('')}>Show all matches</Button>} />
+          ) : visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManageSport(ts.sport_id)} teamPick={teamPick} phaseFilter={phaseFilter} onTimeline={() => setTopView('timeline')} />)}
         </div>
       )}
     </div>
