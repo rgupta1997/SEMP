@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useApi } from '../lib/hooks';
 import { BRAND } from '../lib/brand';
 import { Button, Spinner, toast } from './ui';
+import { publicUrl } from '../lib/native';
 
 // Shared helpers for the "find an existing user by phone, or provision a new login"
 // flow used across the add-user surfaces (org POC, members, organisers/officials).
@@ -39,7 +40,7 @@ export function PhoneLookupNotice({ phone }: { phone: string }) {
 // Shown once after provisioning a new login, with a copy button so the actor can
 // send the details to the user for their first sign-in (they're forced to reset).
 export function CredentialsPanel({ creds, onDone }: { creds: Credentials; onDone: () => void }) {
-  const signInUrl = `${window.location.origin}/login`;
+  const signInUrl = publicUrl('/login');
   const text = useMemo(() => [
     `Your ${BRAND.name} login`,
     `Name: ${creds.name}`,

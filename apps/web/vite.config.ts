@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   // THE APP IS NOT AT THE ROOT. The root of the site is the marketing page
   // (landing-page-v2); this app is served from /app. One deploy, two builds -
@@ -16,10 +16,13 @@ export default defineConfig({
   // The dev server obeys it too - `npm run dev:web` serves on
   // http://localhost:5173/app/ - deliberately, so a path bug that only appears
   // under a prefix appears in development rather than first in production.
-  base: '/app/',
+  //
+  // The Android app is the exception: inside the APK the bundle is the whole
+  // origin (https://localhost), so `--mode android-*` builds sit at '/'.
+  base: mode.startsWith('android') ? '/' : '/app/',
   // 5174, BEHIND the marketing site's dev server on 5173, which proxies /app here
   // (see landing-page-v2/vite.config.js). Open http://localhost:5173/app - one
   // origin in development, laid out exactly like the deploy. Hitting 5174/app
   // directly also works if you only want the product.
   server: { port: 5174, strictPort: true },
-});
+}));

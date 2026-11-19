@@ -12,6 +12,7 @@ import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Paginat
 import { SheetPreview, openDoc, downloadCertificate } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
+import { publicUrl, openPublic } from '../../lib/native';
 
 // My Sports Profile (PG-12, F-046..F-050).
 //
@@ -203,7 +204,7 @@ function CertificateRow({ c }: { c: CertRow }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const dead = !!(c.revoked_at || c.superseded_at);
-  const verifyUrl = `${window.location.origin}/verify/${c.token}`;
+  const verifyUrl = publicUrl(`/verify/${c.token}`);
 
   const copyVerify = async () => {
     try {
@@ -276,7 +277,7 @@ function CertificateRow({ c }: { c: CertRow }) {
                 {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
                 {copied ? 'Copied' : 'Copy verification link'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => window.open(`/verify/${c.token}`, '_blank', 'noopener')}>
+              <Button size="sm" variant="ghost" onClick={() => openPublic(`/verify/${c.token}`)}>
                 <ExternalLink size={13} aria-hidden />Verification page
               </Button>
             </div>
@@ -524,7 +525,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
 
   const copy = async () => {
     if (!id.public_url) return;
-    await navigator.clipboard.writeText(`${window.location.origin}${id.public_url}`);
+    await navigator.clipboard.writeText(publicUrl(id.public_url));
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };

@@ -77,3 +77,9 @@ semp-full*.sql
 
 # Local Supabase connection string for migration work (contains a password).
 infra/.supa.local
+
+# Android app signing - NEVER commit. Losing the upload key locks you out of
+# Play Store updates, so back these up somewhere safe instead.
+*.jks
+*.keystore
+apps/web/android/keystore.properties
