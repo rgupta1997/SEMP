@@ -78,7 +78,8 @@ function TeamRow({ name, short, org, score, isWinner, decided, warning, placehol
         {warning ? <span aria-hidden>⚠</span> : <TeamAvatar name={placeholder ? null : name} short={short} size="sm" />}
         <span className="min-w-0">
           <span className={cn('flex items-center gap-1 text-[13px] leading-tight', placeholder && 'italic text-slate-400 dark:text-slate-500')}>
-            <span className="truncate">{name}</span>
+            {/* pr: an italic last letter leans past the box and truncate would clip it. */}
+            <span className={cn('truncate', placeholder && 'pr-1')}>{name}</span>
             {/* The final's winner: a small trophy, not a card of its own. */}
             {champion && <Trophy size={13} className="shrink-0 text-amber-500" aria-label="Champion" />}
           </span>

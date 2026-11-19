@@ -140,6 +140,19 @@ const at = (k: Kit, x: number, y: number, rot = 0, s = 1) => (
 );
 const SVG_PROPS = { fill: 'none', stroke: 'currentColor', strokeWidth: 3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
 
+const ICON_OFFSET: Partial<Record<Kit, number>> = { racket: -34, shuttlecock: 28 };
+/** The kit's pieces, in a pleasant order for cycling through. */
+export const SPORT_ICON_KINDS: Kit[] = ['football', 'racket', 'basketball', 'shuttlecock', 'bat', 'volleyball', 'ball'];
+/** One piece of the kit as a plain line icon (a bolder stroke, since it is drawn small). */
+export function SportIcon({ kind, size = 28, className }: { kind: Kit; size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="-80 -80 160 160" className={className} {...SVG_PROPS} strokeWidth={9}>
+      {/* The racket and shuttlecock are drawn off-centre for the banner; centre them here. */}
+      <g transform={`translate(0 ${ICON_OFFSET[kind] ?? 0})`}>{KIT[kind]}</g>
+    </svg>
+  );
+}
+
 /**
  * Faint line-drawn sports kit behind the banner: purely decorative. A wide layout
  * anchored right (the headline stays clean) and a compact one for a phone.
@@ -255,8 +268,10 @@ export function EventPulse({ counts, value, onChange, title }: {
 }
 
 /** A pill switch in the chips' style: page views (Fixtures / Timeline) and a sport's categories. */
-export function ViewTabs<T extends string>({ value, onChange, options }: {
+export function ViewTabs<T extends string>({ value, onChange, options, size = 'md' }: {
   value: T; onChange: (v: T) => void;
+  /** sm: inside a card's action row. */
+  size?: 'sm' | 'md';
   options: Array<{ value: T; label: string; icon?: typeof Radio; badge?: ReactNode }>;
 }) {
   return (
@@ -266,13 +281,31 @@ export function ViewTabs<T extends string>({ value, onChange, options }: {
         const Icon = o.icon;
         return (
           <button key={o.value} type="button" role="tab" aria-selected={active} onClick={() => onChange(o.value)}
-            className={cn('flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
+            className={cn('flex items-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
+              size === 'sm' ? 'px-3 py-1 text-[13px]' : 'px-4 py-1.5 text-sm',
               active ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500' : 'text-slate-600 hover:bg-slate-50 hover:text-brand-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-brand-300')}>
-            {Icon && <Icon size={15} aria-hidden />}{o.label}{o.badge}
+            {Icon && <Icon size={size === 'sm' ? 14 : 15} aria-hidden />}{o.label}{o.badge}
           </button>
         );
       })}
     </div>
+  );
+}
+
+/** A rounded action button in the chips' style; `primary` for the one thing to do next. */
+export function PillButton({ icon: Icon, children, onClick, disabled, title, tone = 'default' }: {
+  icon?: typeof Radio; children: ReactNode; onClick: () => void; disabled?: boolean; title?: string;
+  tone?: 'default' | 'primary';
+}) {
+  return (
+    // Disabled stays hoverable (no pointer-events-none), so its title explains why.
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      className={cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
+        tone === 'primary'
+          ? 'border-brand-600 bg-brand-600 text-white hover:bg-brand-700 dark:border-brand-500 dark:bg-brand-500'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700 disabled:hover:border-slate-200 disabled:hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-brand-500/50 dark:hover:text-brand-300')}>
+      {Icon && <Icon size={14} aria-hidden />}{children}
+    </button>
   );
 }
 
@@ -531,7 +564,7 @@ export function MatchCard({ f, home, away, ground, official, canManage, actions,
               {s.full}{showOrg && <span className="ml-1.5 text-[11px] font-normal text-slate-400">{s.org}</span>}
             </span>
           ) : (
-            <span className={cn('block truncate text-sm italic', s.blocked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500')} title={s.title}>{s.slotLabel}</span>
+            <span className={cn('block truncate pr-1 text-sm italic', s.blocked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500')} title={s.title}>{s.slotLabel}</span>
           )}
         </div>
         {scored && (
@@ -660,3 +693,97 @@ export function DrawSteps({ hasFixtures, unscheduled, live, done, total, onTimel
     </div>
   );
 }
+
+// ---- Loading skeletons: the page's real shapes, shimmering, instead of a spinner ----
+
+/** One grey block. */
+function Skel({ className }: { className?: string }) {
+  // cn() only joins classes, so the default rounding applies only when none is given.
+  return <span aria-hidden className={cn('block animate-pulse bg-slate-200/80 dark:bg-slate-800', !className?.includes('rounded') && 'rounded-md', className)} />;
+}
+
+/** The blue progress banner, waiting for its numbers. */
+export function BannerSkeleton({ tiles = 4 }: { tiles?: 3 | 4 }) {
+  return (
+    <div aria-hidden className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 p-4 sm:p-5">
+      <div className="flex animate-pulse flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-2.5 lg:w-72">
+          <span className="block h-2.5 w-28 rounded bg-white/25" />
+          <span className="block h-7 w-52 rounded bg-white/30" />
+          <span className="block h-2 w-full rounded-full bg-white/20" />
+          <span className="block h-2.5 w-24 rounded bg-white/20" />
+        </div>
+        <div className={cn('grid grid-cols-2 gap-2 lg:shrink-0', tiles === 3 ? 'sm:grid-cols-3 lg:w-[33rem]' : 'sm:grid-cols-4 lg:w-[36rem]')}>
+          {Array.from({ length: tiles }, (_, i) => <span key={i} className="block h-[5.25rem] rounded-xl bg-white/10 ring-1 ring-white/15" />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One stacked match card. */
+export function MatchCardSkeleton() {
+  return (
+    <div aria-hidden className="relative overflow-hidden rounded-xl border border-slate-200 bg-white py-3 pl-4 pr-3 dark:border-slate-800 dark:bg-slate-900">
+      <span className="absolute inset-y-0 left-0 w-1 bg-slate-200 dark:bg-slate-700" />
+      <div className="flex gap-4">
+        <div className="hidden w-[7rem] shrink-0 space-y-1.5 sm:block"><Skel className="h-2.5 w-14" /><Skel className="h-3.5 w-16" /></div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skel className="h-2.5 w-48 max-w-full" />
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center gap-2.5">
+              <Skel className="h-6 w-6 rounded-full" /><Skel className="h-3.5 w-40 max-w-[60%]" /><Skel className="ml-auto h-4 w-6" />
+            </div>
+          ))}
+          <Skel className="h-2.5 w-32" />
+        </div>
+        <div className="hidden w-[13rem] shrink-0 items-center justify-end gap-2 border-l border-slate-100 pl-4 sm:flex dark:border-slate-800">
+          <Skel className="h-8 w-20 rounded-lg" /><Skel className="h-8 w-8 rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A sport heading and its category card with a few match cards. */
+export function SportSectionSkeleton({ cards = 3 }: { cards?: number }) {
+  return (
+    <div aria-hidden className="space-y-3">
+      <div className="flex items-center gap-3">
+        <Skel className="h-11 w-11 rounded-2xl" />
+        <div className="space-y-1.5"><Skel className="h-4 w-28" /><Skel className="h-2.5 w-44" /></div>
+      </div>
+      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3"><Skel className="h-9 w-9 rounded-full" /><div className="space-y-1.5"><Skel className="h-3.5 w-24" /><Skel className="h-2.5 w-36" /></div></div>
+          <div className="flex gap-2"><Skel className="h-7 w-28 rounded-full" /><Skel className="h-7 w-20 rounded-full" /></div>
+        </div>
+        {Array.from({ length: cards }, (_, i) => <MatchCardSkeleton key={i} />)}
+      </div>
+    </div>
+  );
+}
+
+/** Schedule or Results, before anything has loaded. */
+export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' }) {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      {kind === 'schedule' && <Skel className="h-9 w-56 rounded-full" />}
+      <div className="flex gap-3 overflow-hidden">
+        {Array.from({ length: 8 }, (_, i) => <div key={i} className="flex w-16 shrink-0 flex-col items-center gap-1.5"><Skel className="h-12 w-12 rounded-full" /><Skel className="h-2.5 w-12" /></div>)}
+      </div>
+      <BannerSkeleton tiles={kind === 'results' ? 3 : 4} />
+      {kind === 'results' && (
+        <div className="flex gap-3 overflow-hidden">
+          {Array.from({ length: 4 }, (_, i) => <Skel key={i} className="h-36 w-64 shrink-0 rounded-xl" />)}
+        </div>
+      )}
+      <div className="flex gap-2 overflow-hidden">
+        {['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'].map((w, i) => <Skel key={i} className={cn('h-9 shrink-0 rounded-full', w)} />)}
+      </div>
+      <SportSectionSkeleton />
+      <SportSectionSkeleton cards={2} />
+    </div>
+  );
+}
+

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -24,7 +25,10 @@ import {
 // Reads/mutations go through the shared `notificationHooks` (packages/notifications)
 // instead of a local implementation, so this stays in sync with the rest of the app
 // (Compose modal, Realtime provider) without duplicating query-key logic.
-export function NotificationBell() {
+export function NotificationBell({ className }: {
+  /** Trigger styling where the bell sits (the sidebar footer is darker than a header). */
+  className?: string;
+} = {}) {
   const [open, setOpen] = useState(false);
   const [composing, setComposing] = useState(false);
 
@@ -75,8 +79,8 @@ export function NotificationBell() {
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
-        className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+        onClick={() => setOpen((o) => !o)}
+        className={cn('relative grid h-9 w-9 place-items-center rounded-lg', className ?? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')}
         aria-label={
           unread > 0
             ? `Notifications (${unread} unread)`
@@ -93,6 +97,8 @@ export function NotificationBell() {
         )}
       </button>
 
+      {/* Portalled: the sidebar clips and transforms its children, which would trap a fixed drawer. */}
+      {createPortal(<>
       {/* Scrim */}
       {open && (
         <div
@@ -174,6 +180,7 @@ export function NotificationBell() {
           onClose={() => setComposing(false)}
         />
       )}
+      </>, document.body)}
     </>
   );
 }

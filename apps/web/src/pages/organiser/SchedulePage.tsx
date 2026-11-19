@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarRange, ClipboardList, ClipboardPen, Eye, LayoutList, Pencil, Trash2 } from 'lucide-react';
+import { CalendarRange, ClipboardList, ClipboardPen, Eye, Grid3x3, Layers, LayoutList, Network, Pencil, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, Trophy, UserPlus } from 'lucide-react';
 import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -9,7 +9,7 @@ import { ARCHIVED_READ_ONLY_MESSAGE, isChessSport, isRankingSport, isScoredSport
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusLegend, toast } from '../../components/ui';
+import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusLegend, toast } from '../../components/ui';
 import { BackToTop } from '../../components/BackToTop';
 import { Bracket } from '../../components/Bracket';
 import { openTieCount, tablesPath, TABLES_REFRESH_MS, type DrawTables } from '../../components/GroupTables';
@@ -20,7 +20,7 @@ import { StageConfigWizard } from '../../components/StageConfigWizard';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
 import { isPoolShapedFormat, titleCase } from '../../lib/format';
 import { LockMark, useEventPlan } from '../../lib/eventPlan';
-import { AllPlayedPill, countPhases, DrawSteps, EventPulse, MatchCard, matchPhase, ProgressRing, realMatch, SportChips, sortByCategory, TeamChips, ViewTabs, type CardSide, type PhaseFilter, type TeamSide } from '../../features/schedule/ScheduleParts';
+import { AllPlayedPill, BannerSkeleton, MatchCardSkeleton, PageSkeleton, SportSectionSkeleton, countPhases, DrawSteps, EventPulse, MatchCard, matchPhase, PillButton, ProgressRing, realMatch, SportChips, sortByCategory, TeamChips, ViewTabs, type CardSide, type PhaseFilter, type TeamSide } from '../../features/schedule/ScheduleParts';
 
 /**
  * The scoring entry point, on Schedule.
@@ -852,7 +852,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   return (
     <Card className="min-w-0 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        {/* A floor on the title block: narrow cards wrap the actions below rather than crushing it. */}
+        <div className="flex min-w-[min(100%,16rem)] flex-1 items-center gap-3">
           {playable > 0 && phases.done < playable && <ProgressRing done={phases.done} live={phases.live} total={playable} />}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -868,14 +869,10 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         </div>
         {/* Wraps: five controls do not fit one line on a narrow phone (Regenerate ran off
             the card). Under 427px every button is also tightened so they fit one line. */}
-        <div className="flex flex-wrap items-center gap-2 max-[427px]:gap-1.5 max-[427px]:[&_button]:min-h-0 max-[427px]:[&_button]:px-2 max-[427px]:[&_button]:py-1.5 max-[427px]:[&_button]:text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 max-[427px]:gap-1.5">
           {fixtures.length > 0 && !isRanking && !teamPick && !phaseFilter && (
-            <Segmented
-              size="sm"
-              value={view}
-              onChange={setView}
-              options={[{ value: 'list', label: 'List' }, { value: 'visual', label: visualLabel }]}
-            />
+            <ViewTabs size="sm" value={view} onChange={setView}
+              options={[{ value: 'list', label: 'List', icon: LayoutList }, { value: 'visual', label: visualLabel, icon: hasBracket ? Network : Grid3x3 }]} />
           )}
           {/* Editing the format AFTER generation. It was only reachable from the
               Generate button, so once a draw existed its scoring rules were frozen
@@ -883,21 +880,21 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
               could never be changed at all. Every scored sport now, cricket
               included - it has a format shelf of its own. */}
           {canManage && isScoredSport(sportName) && (
-            <Button size="sm" variant="subtle" disabled={archived} title={archivedTitle} onClick={() => setEditingFormat(true)}>Format</Button>
+            <PillButton icon={SlidersHorizontal} disabled={archived} title={archivedTitle ?? 'Scoring rules for this category'} onClick={() => setEditingFormat(true)}>Format</PillButton>
           )}
           {canManage && (
-            <Button size="sm" variant="subtle" disabled={archived || !manualOk}
-              title={!manualOk ? 'Manual schedule changes are not on this event’s plan - generate the schedule instead' : archivedTitle}
+            <PillButton icon={manualOk ? Plus : undefined} disabled={archived || !manualOk}
+              title={!manualOk ? 'Manual schedule changes are not on this event’s plan - generate the schedule instead' : archivedTitle ?? 'Add a match by hand'}
               onClick={() => setCreating(true)}>
-              {!manualOk && <LockMark capability="manual_schedule" className="mr-1" />}+ Add fixture
-            </Button>
+              {!manualOk && <LockMark capability="manual_schedule" />}Add fixture
+            </PillButton>
           )}
           {canManage && (
             poolShaped ? (
               // Pools feeding a bracket can only ever come from the stage-config
               // wizard (generate-all) - the plain single-stage route below can never
               // produce both, so it is not offered at all for this shape of format.
-              <Button size="sm" variant={knockoutPending ? 'primary' : (fixtures.length ? 'outline' : 'primary')} disabled={hasPlayed || archived}
+              <PillButton icon={knockoutPending ? Trophy : Layers} tone={knockoutPending || !fixtures.length ? 'primary' : 'default'} disabled={hasPlayed || archived}
                 title={archivedTitle ?? (hasPlayed
                   ? 'This draw has played matches - reconfiguring would erase those results.'
                   : knockoutPending
@@ -905,9 +902,10 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                     : undefined)}
                 onClick={() => setConfiguringStages(true)}>
                 {knockoutPending ? 'Set up knockout' : fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
-              </Button>
+              </PillButton>
             ) : (
-              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={archived || generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
+              <PillButton icon={!fixtures.length ? Sparkles : isLeague && !leagueDrawMismatched ? UserPlus : RefreshCw} tone={fixtures.length ? 'default' : 'primary'}
+                disabled={archived || generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
                 title={archivedTitle ?? (isLeague && !leagueDrawMismatched && fixtures.length
                   ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
                   : leagueDrawMismatched
@@ -918,7 +916,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                   runGenerate();
                 }}>
                 {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague && !leagueDrawMismatched ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
-              </Button>
+              </PillButton>
             )
           )}
         </div>
@@ -941,7 +939,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
             <Button size="sm" variant="outline" onClick={() => drawNavigate(`/championships/${drawEventId}/results?tally=${td.id}`)}>View point tally</Button>
           </div>
         )}
-        {isLoading ? <Spinner /> : fixtures.length === 0 ? (
+        {isLoading ? <div className="space-y-2"><MatchCardSkeleton /><MatchCardSkeleton /></div> : fixtures.length === 0 ? (
           <div className="flex items-center gap-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
             <span className="text-2xl" aria-hidden>🏟️</span>
             <span>{isRanking
@@ -1326,9 +1324,7 @@ export function SchedulePage() {
     .filter((c) => !teamPick || c.total > 0 || pickedSports.includes(c.id))
     .sort((a, b) => b.live - a.live || a.name.localeCompare(b.name));
 
-  if (tournamentsLoading) {
-    return <div className="grid h-40 place-items-center"><Spinner /></div>;
-  }
+  if (tournamentsLoading) return <PageSkeleton kind="schedule" />;
   if (tournaments.length === 0) {
     return <EmptyState icon="⚑" title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
   }
@@ -1382,7 +1378,7 @@ export function SchedulePage() {
           </div>
         )
       ) : tsportsLoading ? (
-        <div className="grid h-40 place-items-center"><Spinner /></div>
+        <div className="space-y-6"><SportSectionSkeleton /><SportSectionSkeleton cards={2} /></div>
       ) : tsports.length === 0 ? (
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : !teamHasMatch ? (
@@ -1392,7 +1388,7 @@ export function SchedulePage() {
         <div className="space-y-6">
           {/* Not "0 of 0 played" while the fixtures are still on their way. */}
           {fixturesLoading
-            ? <div className="grid h-36 place-items-center rounded-2xl bg-slate-50 dark:bg-slate-800/40"><Spinner /></div>
+            ? <BannerSkeleton />
             : <EventPulse title={teamFilter ? `${teamName(teamFilter)} · matches` : pickedSide ? `${pickedSide.full} · matches` : 'Event progress'} counts={pulseCounts} value={phaseFilter} onChange={setPhaseFilter} />}
           <SportChips sports={chipSports} value={pickedSports} onChange={(ids) => setSportParam(ids.join(','))} />
           {!phaseHasMatch ? (

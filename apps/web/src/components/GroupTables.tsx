@@ -1,9 +1,33 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check } from 'lucide-react';
 import { formatPoints, type GroupRanking, type TieResolution } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { Badge, Button, Modal, Spinner, Textarea, cn, toast } from './ui';
+import { TeamAvatar } from '../features/schedule/ScheduleParts';
+
+// Shared table styling, so pools and the cross-group table read the same.
+const CARD = 'min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
+const HEAD_ROW = 'bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800/40 dark:text-slate-500';
+const ROW = 'border-t border-slate-100 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30';
+
+/** A team in a table: its badge and name. */
+function TeamCell({ name, short }: { name: string; short: string | null }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <TeamAvatar name={name} short={short} size="sm" />
+      <span className="max-w-[12rem] truncate font-semibold text-slate-800 dark:text-slate-100" title={name}>{short || name}</span>
+    </span>
+  );
+}
+/** Goal / point difference, signed and coloured. */
+function Diff({ v }: { v: number }) {
+  return <span className={cn('tabular-nums', v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400')}>{v > 0 ? '+' : ''}{formatPoints(v)}</span>;
+}
+/** Points, the column people read first. */
+function Pts({ v }: { v: number }) {
+  return <span className="inline-grid min-w-8 place-items-center rounded-md bg-brand-50 px-1.5 py-0.5 text-[13px] font-black tabular-nums text-brand-700 dark:bg-brand-500/15 dark:text-brand-200">{formatPoints(v)}</span>;
+}
 
 // Group / league tables of one draw, ranked exactly as advancement and the overall
 // table rank them. Teams the tie-breakers can't separate are ordered here by hand,
@@ -154,16 +178,16 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
     : span ? `Ranking across groups: ${span}` : 'Ranking across groups';
   const nameOf = (r: CrossGroup['rows'][number]) => <span className="font-medium text-slate-700 dark:text-slate-200">{r.short_name || r.name}</span>;
   return (
-    <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
-      <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
+    <div className={CARD}>
+      <div className="border-b border-slate-100 px-3 py-2.5 text-sm font-black text-slate-800 dark:border-slate-800 dark:text-slate-100">
         {title}{multiStage ? <span className="ml-2 text-xs font-normal text-slate-400">Stage {c.stage}</span> : null}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              <th className="px-3 py-1.5 text-left">Team</th>
-              <th className="px-2 py-1.5 text-left">Group</th>
+            <tr className={HEAD_ROW}>
+              <th className="px-3 py-2 text-left">Team</th>
+              <th className="px-2 py-2 text-left">Group</th>
               {['P', 'W', 'D', 'L', 'Diff', 'For', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
               {c.rows.some((r) => r.frames_won !== undefined) && <FrameHeads />}
               <th className="px-3 py-1.5 text-right">Place</th>
@@ -171,16 +195,16 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
           </thead>
           <tbody>
             {c.rows.map((r) => (
-              <tr key={r.entity_id}>
-                <td className="max-w-[12rem] truncate px-3 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.short_name || r.name}</td>
+              <tr key={r.entity_id} className={ROW}>
+                <td className="px-3 py-2"><TeamCell name={r.name} short={r.short_name} /></td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-slate-500 dark:text-slate-400">{r.pool}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.played}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.won}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.drawn}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.lost}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
+                <td className="px-2 py-1.5 text-right"><Diff v={r.score_for - r.score_against} /></td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for)}</td>
-                <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatPoints(r.points)}</td>
+                <td className="px-2 py-1.5 text-right"><Pts v={r.points} /></td>
                 {c.rows.some((x) => x.frames_won !== undefined) && <FrameCells r={r} />}
                 <td className="px-3 py-1.5 text-right">{r.place != null ? <Badge tone="brand">{ordinal(r.place)}</Badge> : <span className="text-slate-400">-</span>}</td>
               </tr>
@@ -222,17 +246,22 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
     return tie ? Math.min(...pool.rows.filter((x) => tie.includes(x.entity_id)).map((x) => x.rank ?? Infinity)) : r.rank;
   };
   return (
-    <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{pool.label}</span>
-        {pool.complete ? <Badge tone="green">Final</Badge> : <Badge tone="slate">In progress</Badge>}
+    <div className={CARD}>
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+        <span className="text-sm font-black text-slate-800 dark:text-slate-100">{pool.label}</span>
+        <span className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">{pool.rows.length} teams</span>
+          {pool.complete
+            ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><Check size={12} strokeWidth={2.75} aria-hidden />Final</span>
+            : <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-bold text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"><span className="h-1.5 w-1.5 rounded-full bg-sky-500" aria-hidden />In progress</span>}
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              <th className="px-3 py-1.5 text-left">#</th>
-              <th className="px-2 py-1.5 text-left">Team</th>
+            <tr className={HEAD_ROW}>
+              <th className="w-10 px-3 py-2 text-left">#</th>
+              <th className="px-2 py-2 text-left">Team</th>
               {['P', 'W', 'D', 'L', 'For', 'Ag', 'Diff', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
               {showFrames && <FrameHeads />}
               {showSetQ && <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Sets quotient: sets won divided by sets lost">Set Q</th>}
@@ -244,17 +273,20 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
           </thead>
           <tbody>
             {pool.rows.map((r) => (
-              <tr key={r.entity_id} className={tiedIds.has(r.entity_id) ? 'bg-amber-50 dark:bg-amber-500/10' : ''}>
-                <td className="px-3 py-1.5 text-slate-400">{shownRank(r)}</td>
-                <td className="max-w-[12rem] truncate px-2 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.short_name || r.name}</td>
+              <tr key={r.entity_id} className={cn(ROW, tiedIds.has(r.entity_id) && 'bg-amber-50 dark:bg-amber-500/10')}>
+                <td className="px-3 py-2">
+                  <span className={cn('grid h-6 w-6 place-items-center rounded-full text-[11px] font-black tabular-nums',
+                    shownRank(r) === 1 ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{shownRank(r)}</span>
+                </td>
+                <td className="px-2 py-2"><TeamCell name={r.name} short={r.short_name} /></td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.played}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.won}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.drawn}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.lost}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_against)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
-                <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.points)}</td>
+                <td className="px-2 py-1.5 text-right"><Diff v={r.score_for - r.score_against} /></td>
+                <td className="px-2 py-1.5 text-right"><Pts v={r.points} /></td>
                 {showFrames && <FrameCells r={r} />}
                 {showSetQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.set_quotient)}</td>}
                 {showPointQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.point_quotient)}{(r.point_quotient_missing ?? 0) > 0 ? '*' : ''}</td>}
@@ -322,10 +354,13 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
     <div className="space-y-4">
       {data.stages.map((s) => (
         <div key={s.stage} className="space-y-2">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{multi ? `Stage ${s.stage} tables` : 'Tables'}</span>
-            <span className="text-xs text-slate-400 dark:text-slate-500">
-              Win {s.ranking.win} · Draw {s.ranking.draw} · Loss {s.ranking.loss} · ranked by {inSentence(s.ranking.labels.join(', '))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-black text-slate-800 dark:text-slate-100">{multi ? `Stage ${s.stage} points table` : 'Points table'}</span>
+            <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              {([['Win', s.ranking.win], ['Draw', s.ranking.draw], ['Loss', s.ranking.loss]] as const).map(([k, v]) => (
+                <span key={k} className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{k} {v}</span>
+              ))}
+              <span className="ml-1">Ranked by {inSentence(s.ranking.labels.join(', '))}</span>
             </span>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">

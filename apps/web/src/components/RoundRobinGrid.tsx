@@ -192,7 +192,7 @@ function Crosstable({ fixtures, teamName, teamOrg, teamShort, onSelect, caption 
                       {/* Phone: the code only, so the result cells keep the width. */}
                       <span className="text-xs font-bold sm:hidden" title={e.name}>{e.code}</span>
                       <span className="hidden min-w-0 sm:block">
-                        <span className={cn('block max-w-[14rem] truncate text-[13px] leading-tight', e.isSlot && 'italic text-slate-400')} title={e.name}>{e.name}</span>
+                        <span className={cn('block max-w-[14rem] truncate text-[13px] leading-tight', e.isSlot && 'pr-1 italic text-slate-400')} title={e.name}>{e.name}</span>
                         {showOrg && <span className="block truncate text-[10px] font-normal leading-tight text-slate-400 dark:text-slate-500">{e.org}</span>}
                       </span>
                     </div>

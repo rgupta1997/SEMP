@@ -17,7 +17,7 @@ import { GroupTables, TallyTabLabel } from '../../components/GroupTables';
 import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../../components/TitleTally';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
 import { BackToTop } from '../../components/BackToTop';
-import { LiveStrip, MatchCard, ProgressRing, sortByCategory, ViewTabs, PulseBanner, SportChips, TeamChips, type CardSide, type PulseTile, type TeamSide } from '../../features/schedule/ScheduleParts';
+import { BannerSkeleton, LiveStrip, MatchCard, SportSectionSkeleton, ProgressRing, sortByCategory, ViewTabs, PulseBanner, SportChips, TeamChips, type CardSide, type PulseTile, type TeamSide } from '../../features/schedule/ScheduleParts';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
@@ -615,7 +615,7 @@ export function ResultsPage() {
       <TeamChips sides={sides} value={sideKey} onChange={setSideKey} />
 
       {isLoading
-        ? <div className="grid h-36 place-items-center rounded-2xl bg-slate-50 dark:bg-slate-800/40"><Spinner /></div>
+        ? <BannerSkeleton tiles={3} />
         : (
           <PulseBanner
             eyebrow={pickedSide ? `${pickedSide.full} · results` : 'Results'}
@@ -687,7 +687,7 @@ export function ResultsPage() {
         </p>
       )}
 
-      {isLoading ? null : visibleRows.length === 0 ? (
+      {isLoading ? <div className="space-y-6"><SportSectionSkeleton /><SportSectionSkeleton cards={2} /></div> : visibleRows.length === 0 ? (
         <EmptyState
           icon={<Flag size={24} />}
           title={fixtures.length === 0 ? 'No fixtures yet'
@@ -750,7 +750,7 @@ export function ResultsPage() {
                 {/* One card per category, like Schedule's draw cards. */}
                 <Card className="min-w-0 p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex min-w-[min(100%,16rem)] flex-1 items-center gap-3">
                       {queue === 'all' && g.rows.length > 0 && official < g.rows.length && <ProgressRing done={official} live={live} total={g.rows.length} />}
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">

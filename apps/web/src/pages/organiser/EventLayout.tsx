@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
+import { PageSkeleton } from '../../features/schedule/ScheduleParts';
 import { api } from '../../lib/api';
 import { archiveDaysLeft, archivePurgeDate, citiesShort } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
@@ -100,7 +101,12 @@ export function EventLayout() {
       />
     );
   }
-  if (isLoading || !championship) return <Spinner />;
+  if (isLoading || !championship) {
+    // Schedule and Results show their own layout shimmering rather than a lone spinner.
+    const seg = parseEventSegment(pathname, eventId!);
+    if (seg === 'schedule' || seg === 'results') return <PageSkeleton kind={seg} />;
+    return <Spinner />;
+  }
 
   // A section reachable by URL that the sidebar does not offer is an access bug
   // waiting to happen, so both are answered from the same list. The server still
