@@ -30,6 +30,7 @@ import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, typ
 import { CricketDeck } from '../../features/scoring/CricketDeck';
 import { TeamDeck } from '../../features/scoring/TeamDeck';
 import { TeamSheetPanel } from '../../features/scoring/TeamSheetPanel';
+import { ManualStatsPanel, attributionError, manualStatSpec, manualTimeline, seedManualEvents, type ManualEvent } from '../../features/scoring/ManualStatsPanel';
 import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type SideSheet, type TeamSheet } from '@semp/shared';
 import { AUTOSAVE_MS, useLiveSave, useSaveStatus, useUnloadGuard, useDraftAutosave } from '../../features/scoring/useLiveSave';
 import { flushFixture, getStatus, readOutbox, type OutboxEntry } from '../../features/scoring/liveOutbox';
@@ -96,6 +97,7 @@ export function MatchConsolePage() {
    */
   const [focus, setFocus] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const mobile = useIsMobile();
 
   if (isLoading) return <Spinner />;
   if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture isn't available to you." action={<Button onClick={() => navigate(back)}>Back</Button>} />;
@@ -116,6 +118,16 @@ export function MatchConsolePage() {
    * there was no way onward from the console at all.
    */
   const scoringFocus = focus && !adminOpen && !OVER.includes(fixture.status);
+  /**
+   * ON A PHONE, EVERY CONSOLE IS SCORING-ONLY.
+   *
+   * Focus mode above is the full-height layout two decks size themselves to. The
+   * rest of it - one header line instead of three, and the awards, custom points
+   * and scorecard upload tucked behind a button - is what a phone needs for ANY
+   * console: a racquet deck or a final-score form is just as pushed down by them.
+   * So below md it applies to every console while the match is still to score.
+   */
+  const compact = scoringFocus || (mobile && !adminOpen && !OVER.includes(fixture.status));
 
   // The fixture's structure (single / tie / event) and scoring depth (detailed /
   // manual) are now chosen by the official on the console (see ScoringTabs) rather than
@@ -178,8 +190,8 @@ export function MatchConsolePage() {
 
   return (
     <div className={scoringFocus ? 'flex h-full min-h-0 flex-col' : undefined}>
-      {!scoringFocus && <BackButton onClick={done}>{backLabel}</BackButton>}
-      {scoringFocus ? (
+      {!compact && <BackButton onClick={done}>{backLabel}</BackButton>}
+      {compact ? (
         // One line, so the console keeps the screen. Everything the fuller header
         // says is a tap away on the way back out.
         <div className="mb-2 flex shrink-0 items-center gap-2 text-xs">
@@ -255,6 +267,7 @@ export function MatchConsolePage() {
         <div className={scoringFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
           <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done}
             focus={scoringFocus}
+            compact={compact}
             onFocusable={setFocus}
             onOpenAdmin={() => setAdminOpen(true)} />
 
@@ -266,19 +279,28 @@ export function MatchConsolePage() {
             </div>
           )}
 
-          {!scoringFocus && fixture.point_scheme === 'custom' && (
+          {compact && !scoringFocus && (
+            // The post-match sections, one tap away rather than under the deck.
+            <div className="mt-3">
+              <Button variant="subtle" size="sm" className="w-full" onClick={() => setAdminOpen(true)} data-qa="console-more">
+                Awards, points &amp; match admin
+              </Button>
+            </div>
+          )}
+
+          {!compact && fixture.point_scheme === 'custom' && (
             <div className="mt-5">
               <CustomPointsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
           )}
 
-          {!scoringFocus && sportDef(sportNameOf(fixture)).archetype === 'cricket' && (
+          {!compact && sportDef(sportNameOf(fixture)).archetype === 'cricket' && (
             <div className="mt-5">
               <ScorecardPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
           )}
 
-          {!scoringFocus && (
+          {!compact && (
             <div className="mt-5">
               <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
@@ -288,6 +310,21 @@ export function MatchConsolePage() {
       </fieldset>
     </div>
   );
+}
+
+/** Below md - the same breakpoint the shell drops its header and tab bar at on /score. */
+function useIsMobile(): boolean {
+  const query = '(max-width: 767px)';
+  const [m, setM] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const on = () => setM(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return m;
 }
 
 /* ----------------------------- Scoring tabs (structure + depth) ----------------------------- */
@@ -460,27 +497,19 @@ function SaveIndicator({ fixtureId, compact }: { fixtureId: string; compact?: bo
   );
 }
 
-// The compact labels for the depth toggle, which has to say in two or three words
-// what "detailed" MEANS for the sport in hand. It used to say "Ball by ball" for
-// everything, because cricket is where the compact toggle was built - so a football
-// official was offered a ball-by-ball tab above a console with no balls in it.
-// Each family gets the term its own officials use.
-function depthLabels(sport: string | null): Record<string, string> {
-  const detailed = isCricketSport(sport) ? 'Ball by ball'
-    : isRacquetSport(sport) ? 'Point by point'
-    : 'Play by play';
-  return { detailed, manual: 'Totals' };
-}
-
 // Officials pick how to score this match here, not the organiser: the structure
 // (single / team tie / multi-competitor event - only those the sport supports) and the
 // depth (live point-by-point vs final score). Defaults to the sport's natural format
 // (and to whatever has already been scored on reload); switching tabs is non-destructive
 // since each structure keeps its own slice of live_state.
-function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFocusable, onOpenAdmin }:
+function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, compact: compactProp, onFocusable, onOpenAdmin }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[];
     onDone: () => void;
-    focus?: boolean; onFocusable?: (v: boolean) => void; onOpenAdmin?: () => void }) {
+    focus?: boolean;
+    /** A phone: the tabs go to their one-line form whatever the console. */
+    compact?: boolean;
+    onFocusable?: (v: boolean) => void; onOpenAdmin?: () => void }) {
+  const tight = !!focus || !!compactProp;
   const sportName = sportNameOf(fixture);
   const template = resolveTemplate(fixture);
   const singleDef: SportDef = template.single ?? sportDef(sportName);
@@ -610,16 +639,23 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     return resolved.format.entryMode === 'summary' ? 'manual' : 'detailed';
   }, [fixture, live?.live_state, sportName]);
 
-  const storedMode = fixture?.tournament_disciplines?.format_config?.scoring?.scoringMode as ScoringMode | undefined;
+  // The draw's scoring depth, as the organiser set it from the Schedule dialog
+  // (`scoringDepth`), else whatever a stored template carried.
+  const drawConfig = fixture?.tournament_disciplines?.format_config;
+  const storedMode = (drawConfig?.scoringDepth ?? drawConfig?.scoring?.scoringMode) as ScoringMode | undefined;
+  // Set when this match is held in a different mode from its draw's, and why.
+  const [heldNote, setHeldNote] = useState<string | null>(null);
   // The order is the same one the format ladder uses: an EXPLICIT choice on the draw
   // beats what the format merely prefers, which beats the archetype's default.
-  // Either way it is only a DEFAULT - the toggle stays, because manual entry has to
-  // be able to overrule the engine at any point.
+  //
+  // THE CONSOLE NO LONGER OFFERS A CHOICE. Detailed vs final-score is the organiser's
+  // decision, made per draw in the Schedule dialog (format_config.scoringDepth), and
+  // detailed when nothing was set. An official flipping it per match is how the same
+  // draw ended up with half its matches carrying player stats and half not.
   const [mode, setMode] = useState<ScoringMode>(
     storedMode ?? formatEntryMode ?? (manualOnlyArchetype ? 'manual' : 'detailed'),
   );
   const effectiveMode: ScoringMode = forcedManual ? 'manual' : mode;
-  const showDepth = structure !== 'event' && !forcedManual;
 
   // The format only arrives with the live snapshot, which lands after the first
   // render, so the initial useState above may have guessed before it knew. This is a
@@ -633,16 +669,36 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setMode(formatEntryMode);
   }, [formatEntryMode, storedMode]);
 
-  // A finished single match with a saved score but no play log was entered by hand:
-  // reopen it in Manual so a correction starts from that score, not a blank console.
+  /**
+   * A MATCH HALF-SCORED IN ONE MODE STAYS IN IT.
+   *
+   * The organiser can flip a draw between live and final-score entry while some of
+   * its matches are already under way, and the two directions are not symmetric:
+   *
+   * - live -> final score carries everything: the form seeds from the saved score
+   *   and lifts the scorers and cards out of the live log. So those matches simply
+   *   follow the draw.
+   * - final score -> live cannot: the live deck rebuilds the score from its tap log,
+   *   and a match whose score was typed has no log. Opening the deck would show 0-0
+   *   and the first tap would overwrite the real score. So a match with a typed
+   *   score (or typed stats) is held on the final-score form, and says why.
+   *
+   * Finished matches entered by hand have always reopened this way, so a
+   * correction starts from the score on record rather than a blank console.
+   */
   const manualSeeded = useRef(false);
   useEffect(() => {
     if (manualSeeded.current || touched.current || !live || structure !== 'single') return;
     manualSeeded.current = true;
-    const finished = fixture.status === 'completed' || fixture.status === 'confirmed';
-    const typedIn = fixture.home_score != null && fixture.away_score != null && (live.live_log?.length ?? 0) === 0;
-    if (finished && typedIn) setMode('manual');
-  }, [live, structure, fixture.status, fixture.home_score, fixture.away_score]);
+    const typedStats = Array.isArray(live.live_state?.manualEvents);
+    const typedScore = fixture.home_score != null && fixture.away_score != null && (live.live_log?.length ?? 0) === 0;
+    if (typedStats || typedScore) {
+      setMode('manual');
+      if (storedMode === 'detailed' || (!storedMode && !manualOnlyArchetype)) {
+        setHeldNote('This match’s score was entered as a final score, so it stays on this form - live scoring would start again from 0-0 and replace it.');
+      }
+    }
+  }, [live, structure, fixture.status, fixture.home_score, fixture.away_score]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
   // Multi-competitor events default to a simple team ranking (which team did well); the
   // detailed per-athlete console is kept available behind this toggle.
 
@@ -685,25 +741,6 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setStructure(next);
   };
 
-  // Detailed ↔ Manual keeps the running score (Manual seeds from the live tally), but it
-  // changes how the rest of the match is scored - a softer confirm so the official doesn't
-  // flip the mode mid-scoring by accident.
-  const switchMode = async (next: ScoringMode) => {
-    if (next === mode) return;
-    touched.current = true;
-    if (hasProgress) {
-      const ok = await confirmDialog({
-        title: 'Switch scoring mode?',
-        confirmLabel: 'Switch',
-        message: next === 'manual'
-          ? 'Switch to entering a final score? The current score carries over, but live point-by-point scoring stops.'
-          : 'Switch to live point-by-point scoring? The current score carries over.',
-      });
-      if (!ok) return;
-    }
-    setMode(next);
-  };
-
   // Team ranking <-> Detailed carries nothing over (separate live_state keys),
   // so confirm before switching whenever the side being left has data.
   const switchEventMode = async (next: 'team' | 'detailed') => {
@@ -740,27 +777,26 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
 
   return (
     <div className={focus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-      {(structures.length > 1 || showDepth || structure === 'event') && (
-        <div className={cn('flex flex-wrap items-end gap-x-6 gap-y-3', focus ? 'mb-2 shrink-0' : 'mb-5')}>
+      {(structures.length > 1 || structure === 'event') && (
+        <div className={cn('flex flex-wrap items-end gap-x-6 gap-y-3', tight ? 'mb-2 shrink-0' : 'mb-5')}>
           {/* Only offer the structure switch when there's a real choice - event-only
               sports have a single structure, so the lone tab is hidden. */}
           {structures.length > 1 && (
-            <TabBar label="Match structure" value={structure} onChange={switchStructure} compact={focus}
+            <TabBar label="Match structure" value={structure} onChange={switchStructure} compact={tight}
               options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           )}
           {/* Event/ranking sports (swimming, powerlifting, athletics) default to the
               org-level Team ranking; the detailed per-athlete entry is a named toggle
               of its own, not the depth toggle other sports use below. */}
           {structure === 'event' ? (
-            <TabBar label="Scoring" value={eventMode} onChange={switchEventMode} compact={focus}
+            <TabBar label="Scoring" value={eventMode} onChange={switchEventMode} compact={tight}
               compactLabels={{ team: 'Team ranking', detailed: 'Per-athlete' }}
               options={[{ value: 'team', label: 'Team ranking' }, { value: 'detailed', label: 'Per-athlete · detailed' }]} />
-          ) : showDepth ? (
-            <TabBar label="Scoring" value={mode} onChange={switchMode} compact={focus}
-              compactLabels={depthLabels(sportName)}
-              options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
           ) : null}
         </div>
+      )}
+      {heldNote && effectiveMode === 'manual' && structure === 'single' && (
+        <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300" data-qa="held-mode">{heldNote}</p>
       )}
 
       {structure === 'event' && eventSpec
@@ -1927,6 +1963,9 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          // Stats typed on the final-score form stop counting once the match is
+          // tapped live again: from here the log is the record (player-stats.service).
+          manualEvents: undefined,
           undoTrail: undoTrailRef.current,
           // The clock, written down as a field rather than left to be folded out of
           // the log. See clockSnapshot - the log stays authoritative, this is for
@@ -4544,6 +4583,31 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 
+  // PLAYER STATS beside the score, for the sports whose stats are attributed
+  // actions (goals, assists, cards, raids). Seeded from what was typed before, or
+  // from the live log's actions when the match was switched over part-way.
+  const statSpec = useMemo(() => manualStatSpec(sportNameOf(fixture)), [fixture]);
+  const [statEvents, setStatEvents] = useState<ManualEvent[]>(() => seedManualEvents(live?.live_state));
+  const statsTouched = useRef(false);
+  const statsSeeded = useRef(!!live);
+  useEffect(() => {
+    // The live snapshot can land after the form mounts: seed once, never over edits.
+    if (statsSeeded.current || statsTouched.current || !live) return;
+    statsSeeded.current = true;
+    setStatEvents(seedManualEvents(live.live_state));
+  }, [live]);
+  const editStats = (next: ManualEvent[]) => { statsTouched.current = true; setStatEvents(next); };
+  const statRosters = useMemo(() => {
+    const sheet = readTeamSheet(live?.live_state);
+    const pick = (side: 'A' | 'B') => {
+      const squad = sheetSquad(side === 'A' ? homeTeam(fixture) : awayTeam(fixture));
+      // The team sheet when there is one (starters and subs - a sub can score), else the squad.
+      return (sheet ? matchdaySquad(squad, { playing: sheet[side].playing, bench: sheet[side].bench }) : squad)
+        .map((p) => withJersey(p, sheet?.[side]));
+    };
+    return { A: pick('A'), B: pick('B') };
+  }, [fixture, live?.live_state]);
+
   // Guidance on what the two numbers mean for this sport. `manualHint` (time/measured
   // sports) wins; otherwise derive from the archetype so manual mode reads clearly for
   // any sport (e.g. sets/games won vs raw points).
@@ -4569,6 +4633,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
 
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);
+  const statsError = attributionError(statSpec, statEvents, [hs, as], [homeName, awayName]);
 
   // A real result only: best of N ends with one side on the wins needed and the other
   // below ("2-3" in a best of 3 is a typo, EOS-164); play-all plays every unit; a single
@@ -4638,7 +4703,14 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
       toast.error('A knockout match must have a winner. Level score? Pick who won (e.g. on penalties) under Winner.');
       return;
     }
-    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined },
+    if (statsError) { toast.error(statsError); return; }
+    // Stats are sent once there is anything to say: typed here now, or typed before
+    // (so emptying the list clears them). A match with neither keeps its live log's.
+    const sendStats = !!statSpec && (statEvents.length > 0 || Array.isArray(live?.live_state?.manualEvents));
+    saveResult.mutate({
+      home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined,
+      ...(sendStats ? { stat_events: statEvents, live_log: manualTimeline(statEvents) } : {}),
+    },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
 
@@ -4664,6 +4736,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
           <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
             {gamesError}
           </p>
+        )}
+        {statSpec && (
+          <ManualStatsPanel spec={statSpec} names={[homeName, awayName]} rosters={statRosters}
+            events={statEvents} onChange={editStats} score={[hs, as]}
+            onUseScore={(a, b) => { setHome(String(a)); setAway(String(b)); }} />
         )}
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
@@ -4691,8 +4768,8 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
           {/* Both buttons, not just complete: an impossible games tally (2-3 in a
               best-of-3) is never a valid state to save, live or final - the match
               would already be over the moment either side reached the threshold. */}
-          <Button variant="outline" disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('live')}>Save (keep live)</Button>
-          <Button disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
+          <Button variant="outline" disabled={saveResult.isPending || (!gamesValid && winner !== 'draw') || !!statsError} onClick={() => submit('live')}>Save (keep live)</Button>
+          <Button disabled={saveResult.isPending || (!gamesValid && winner !== 'draw') || !!statsError} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
         </div>
       </CardBody>
     </Card>

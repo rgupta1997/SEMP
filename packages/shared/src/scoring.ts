@@ -208,5 +208,14 @@ export const formatTemplateSchema = z
 // `format_config` validated when a `scoring` key is present, while still allowing
 // any other organiser-set keys to pass through untouched.
 export const disciplineFormatConfigSchema = z
-  .object({ scoring: formatTemplateSchema.optional() })
+  .object({
+    scoring: formatTemplateSchema.optional(),
+    /**
+     * How every match in the draw is scored by default: 'detailed' = the live
+     * play-by-play console, 'manual' = the final score plus player stats. Set from
+     * the Schedule dialog; outranks `scoring.scoringMode`, which it is kept in step
+     * with. Officials can still switch a single match on its console.
+     */
+    scoringDepth: z.enum(SCORING_MODES).optional(),
+  })
   .passthrough();

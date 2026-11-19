@@ -814,6 +814,23 @@ const sameTeamError = { message: 'A team cannot play against itself', path: ['aw
 export const createFixtureSchema = fixtureFields.refine(distinctTeams, sameTeamError);
 export const updateFixtureSchema = fixtureFields.partial().refine(distinctTeams, sameTeamError);
 
+/** One stat typed in with a final-score result (see fixtureResultSchema.stat_events). */
+export const manualStatEventSchema = z.object({
+  t: z.literal('point'),
+  /** Who the POINTS go to - for an own goal, the other side from the player. */
+  side: z.enum(['A', 'B']),
+  pts: z.number().int().min(0).max(100),
+  kind: z.string().min(1).max(40),
+  label: z.string().max(80).optional(),
+  playerId: z.string().max(64).optional(),
+  playerName: z.string().max(120).optional(),
+  secondId: z.string().max(64).optional(),
+  secondName: z.string().max(120).optional(),
+  value: z.number().min(0).max(1000).optional(),
+  /** The match minute, when the official knows it. */
+  minute: z.number().int().min(0).max(300).optional(),
+});
+
 // Result entry from the official's match console: scores + optional winner +
 // a result note. Winner is derived from scores when omitted.
 export const fixtureResultSchema = z.object({
@@ -824,6 +841,14 @@ export const fixtureResultSchema = z.object({
   draw: z.boolean().optional(),
   status: z.enum(FIXTURE_STATUS).optional(),
   notes: z.string().optional(),
+  /**
+   * The player stats typed in beside a final score - who scored, who was carded.
+   * Shaped as the live deck's attributed point events, so the one stat fold reads
+   * both. Sent = authoritative for this match's stats; an empty array clears them.
+   */
+  stat_events: z.array(manualStatEventSchema).max(400).optional(),
+  /** The read-only timeline those stats render as on the match pages. */
+  live_log: z.array(z.record(z.unknown())).max(400).optional(),
 });
 
 // Championship points awarded per side for a single result, entered by the organiser

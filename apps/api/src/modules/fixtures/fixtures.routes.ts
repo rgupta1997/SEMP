@@ -819,6 +819,23 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       throw new BusinessRuleError('Winner must be one of the two teams in this match');
     }
 
+    // live_state is touched only for what this form actually carries, merged over
+    // whatever the live deck left there.
+    const nextLive: Record<string, unknown> = { ...((fixture.live_state as object | null) ?? {}) };
+    let liveTouched = false;
+    // A draw at unequal (or no) scores is a called-off match: flag it so the points are shared.
+    if (draw || winner != null) {
+      nextLive.noResult = draw && (home == null || away == null || home !== away);
+      liveTouched = true;
+    }
+    // Stats typed in with the score (scorers, cards). Kept apart from the live
+    // deck's `rally` log, which still holds the clock and the scoreboard: once sent,
+    // these are what the stat fold reads for this match (player-stats.service).
+    if (req.body.stat_events) {
+      nextLive.manualEvents = req.body.stat_events;
+      liveTouched = true;
+    }
+
     const updated = await prisma.fixtures.update({
       where: { id: req.params.id },
       data: {
@@ -827,10 +844,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         winner_team_id: winner,
         status: req.body.status ?? 'completed',
         notes: req.body.notes ?? fixture.notes,
-        // A draw at unequal (or no) scores is a called-off match: flag it so the points are shared.
-        ...(draw || winner != null
-          ? { live_state: { ...((fixture.live_state as object | null) ?? {}), noResult: draw && (home == null || away == null || home !== away) } }
-          : {}),
+        ...(liveTouched ? { live_state: nextLive as PrismaNS.InputJsonValue } : {}),
+        ...(req.body.live_log ? { live_log: req.body.live_log as PrismaNS.InputJsonValue } : {}),
         // Restarts the 30-minute auto-lock grace period on every confirmation of
         // 'completed' (a correction shouldn't let a stale timestamp fire mid-edit),
         // and clears it the moment the result is no longer finished.

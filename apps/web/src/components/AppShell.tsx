@@ -254,6 +254,17 @@ export function AppShell() {
   const contextNav = !isPlatform && ws.active ? resolveNav(ws.active, ws.granted, ws.navFacts) : [];
   const subtitle = championship?.name ?? (isPlatform ? ROLE_LABELS[activeRole] : ws.active?.name ?? '');
 
+  /**
+   * THE SCORING CONSOLE OWNS A PHONE'S SCREEN.
+   *
+   * An official scoring on a phone holds it in one hand for the whole match, and
+   * every pixel above and below the deck pushes a button further off the bottom.
+   * So below md the shell steps aside on /score: no header row, no tab bar, tight
+   * padding. The console carries its own one-line bar with the way back out. Wider
+   * screens have room for both and keep the shell.
+   */
+  const scoring = pathname.startsWith('/score/');
+
   // Feedback button: only on overview/landing surfaces (My Game, Discover, My
   // Championships, an org's overview, a championship's overview) - not deep inner
   // pages. It's rendered OUTSIDE the scroll/animated container below so that
@@ -380,7 +391,7 @@ export function AppShell() {
               The theme toggle and the role switcher move into the avatar menu,
               where a control used once a month belongs, and the filters move into a
               sheet behind a single button. */}
-          <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 dark:border-slate-800 dark:bg-slate-900">
+          <header className={cn('flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 dark:border-slate-800 dark:bg-slate-900', scoring && 'max-md:hidden')}>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <button onClick={() => setSidebarOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={20} /></button>
               {/* Rail toggle. Desktop only - on a phone the sidebar is a drawer and
@@ -453,12 +464,13 @@ export function AppShell() {
           </header>
           {/* pb-24 below md clears the tab bar; the bar carries its own
               safe-area padding for the home indicator beneath it. */}
-          <main className="min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 pb-24 sm:p-6 md:pb-6 dark:bg-slate-950">
+          <main className={cn('min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 pb-24 sm:p-6 md:pb-6 dark:bg-slate-950', scoring && 'max-md:p-2 max-md:pb-2')}>
             <div key={pathname} className={cn('mx-auto', isWorkspaceSwitch ? 'animate-workspace-enter' : 'animate-page-enter', !eventId && 'max-w-6xl')}>
               <Outlet />
             </div>
           </main>
-          <BottomNav items={contextNav} groups={groups} ctx={ws.active} onMore={() => setSidebarOpen(true)} />
+          {/* md:hidden is BottomNav's own; on /score it is also gone on a phone. */}
+          {!scoring && <BottomNav items={contextNav} groups={groups} ctx={ws.active} onMore={() => setSidebarOpen(true)} />}
         </div>
         {/* A thin top-loading-bar sweep on a real switch - never on first load
             (washGenRef starts at 0 and only moves on an actual prev-id -> new-id
