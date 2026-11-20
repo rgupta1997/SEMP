@@ -16,9 +16,13 @@ describe('the downloads follow the step switches', () => {
   for (const type of SETUP_EVENT_TYPES) {
     for (const step of SETUP_STEP_KEYS) {
       for (const mode of SETUP_STEP_MODES) {
-        it(`${type}: ${step} = ${mode} - the sample for these switches validates with no errors`, () => {
+        // Staff skipped while the host organisation is made from the sheet leaves it
+        // with no owner, which is refused (org_needs_owner) - that one error, nothing else.
+        const ownerless = step === 'staff' && mode === 'skip' && SETUP_DEFAULT_STEPS[type].org === 'sheet';
+        it(`${type}: ${step} = ${mode} - the sample for these switches validates with ${ownerless ? 'only the missing-owner error' : 'no errors'}`, () => {
           const steps = { ...SETUP_DEFAULT_STEPS[type], [step]: mode };
-          expect(errorsFor(type, steps)).toEqual([]);
+          const errors = errorsFor(type, steps).map((e) => e.split(':')[0]);
+          expect(errors).toEqual(ownerless ? ['org_needs_owner'] : []);
         });
       }
     }

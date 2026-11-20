@@ -878,18 +878,22 @@ export function SortDirButton({ dir, onToggle }: { dir: 'asc' | 'desc'; onToggle
 }
 
 /* ----------------------------- SearchInput ----------------------------- */
+/** Rounded field in the chips' style; PickList triggers take the same look via PILL_PICK. */
+const PILL_FIELD = 'h-9 rounded-full border border-slate-200 bg-white text-sm font-medium text-slate-800 shadow-sm placeholder:font-normal placeholder:text-slate-400 transition hover:border-brand-300 focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:hover:border-brand-500/50';
+export const PILL_PICK = '!h-9 !rounded-full dark:!bg-slate-900';
+
 export function SearchInput({
-  value, onChange, placeholder = 'Search…', className = '', autoFocus,
-}: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
+  value, onChange, placeholder = 'Search…', className = '', autoFocus, pill,
+}: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean; pill?: boolean }) {
   return (
     <div className={cn('relative shrink-0', className.includes('w-full') ? 'w-full' : '', className)}>
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><Search size={14} /></span>
+      <span className={cn('pointer-events-none absolute top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500', pill ? 'left-3.5' : 'left-3')} aria-hidden><Search size={14} /></span>
       <input
         value={value}
         autoFocus={autoFocus}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={cn(fieldBase, 'w-full pl-8', value && 'pr-8')}
+        className={cn(pill ? PILL_FIELD : fieldBase, 'w-full', pill ? 'pl-9' : 'pl-8', value && 'pr-8')}
       />
       {value && (
         <button

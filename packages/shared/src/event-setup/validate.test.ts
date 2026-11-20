@@ -658,6 +658,46 @@ describe('Schedule sheet', () => {
     expect(r.summary.byes).toBe(2);
   });
 
+  it('a blank kickoff (TBA) is allowed: the row keeps its date and ground, with no time', () => {
+    const s = sample('intra');
+    for (let row = 2; row <= 6; row++) set(s, 'Schedule', row, 'Kickoff', '');
+    const r = run('intra', s);
+    expect(codes(r, 'error')).toEqual([]);
+    expect(find(r, 'time_to_be_set')).toHaveLength(1);
+    const f = bp(r).fixtures[0];
+    if (f.kind !== 'knockout-rows') throw new Error('expected the sheet bracket');
+    expect(f.rows.map((x) => [x.matchId, x.date, x.kickoff, x.groundKey])).toEqual([
+      ['M1', '2026-10-17', '', 'g1'], ['M2', '2026-10-17', '', 'g2'], ['M3', '2026-10-17', '', 'g1'],
+      ['M4', '2026-10-17', '', 'g2'], ['M5', '2026-10-18', '', 'g1'],
+    ]);
+    // An End with no kickoff is noted and not used; the draw's match minutes stand in.
+    expect(find(r, 'end_ignored').length).toBeGreaterThan(0);
+  });
+
+  it('a kickoff that is not a time is still an error', () => {
+    const s = sample('intra');
+    set(s, 'Schedule', 2, 'Kickoff', 'TBC soon');
+    expect(find(run('intra', s), 'bad_time')).toMatchObject([{ sheet: 'Schedule', row: 2, column: 'Kickoff' }]);
+  });
+
+  it('a draw with Fixtures "By hand" gets no fixtures, and takes no schedule rows', () => {
+    const s = noSchedule();
+    set(s, 'Draws', 2, 'Fixtures', 'By hand');
+    const r = run('intra', s);
+    expect(codes(r, 'error')).toEqual([]);
+    expect(bp(r).fixtures).toEqual([]);
+    expect(bp(r).draws[0].fixturesByHand).toBe(true);
+    expect(find(r, 'fixtures_by_hand')).toHaveLength(1);
+
+    const t = sample('intra');
+    set(t, 'Draws', 2, 'Fixtures', 'By hand');
+    expect(find(run('intra', t), 'schedule_for_by_hand')).toHaveLength(1);
+
+    const u = noSchedule();
+    set(u, 'Draws', 2, 'Fixtures', 'later');
+    expect(find(run('intra', u), 'bad_value')).toMatchObject([{ sheet: 'Draws', row: 2, column: 'Fixtures' }]);
+  });
+
   it('counts one bye in a bracket of three', () => {
     const s = tiny();
     s.Squads.pop();
@@ -862,12 +902,35 @@ describe('step modes', () => {
     expect(r.summary).toMatchObject({ matches: 0, byes: 0 });
   });
 
-  it('staff skipped: no Staff sheet needed, no staff', () => {
+  it('staff skipped: no Staff sheet needed, no staff (host organisation already exists)', () => {
+    const s = sample('intra');
+    delete s.Staff;
+    const r = run('intra', s, { staff: 'skip', org: 'existing' });
+    expect(r.ok).toBe(true);
+    expect(bp(r).staff).toEqual([]);
+  });
+
+  it('a host organisation made from the sheet needs an Org owner', () => {
+    const s = sample('intra');
+    s.Staff = s.Staff.filter((row, i) => i === 0 || !/org owner/i.test(row.join(' ')));
+    const r = run('intra', s);
+    expect(codes(r, 'error')).toEqual(['no_org_owner']);
+    expect(find(r, 'no_org_owner')[0]).toMatchObject({ sheet: 'Staff', column: 'Role' });
+    // An Organiser alone still runs the event, so the organiser check stays quiet.
+    expect(find(r, 'no_organiser')).toHaveLength(0);
+  });
+
+  it('...and Staff set to Skip cannot give it one', () => {
     const s = sample('intra');
     delete s.Staff;
     const r = run('intra', s, { staff: 'skip' });
-    expect(r.ok).toBe(true);
-    expect(bp(r).staff).toEqual([]);
+    expect(codes(r, 'error')).toEqual(['org_needs_owner']);
+  });
+
+  it('an organisation that already exists does not need an owner on the sheet', () => {
+    const s = sample('intra');
+    s.Staff = s.Staff.filter((row, i) => i === 0 || !/org owner/i.test(row.join(' ')));
+    expect(codes(run('intra', s, { org: 'existing' }), 'error')).toEqual([]);
   });
 
   it('"already exists" steps are noted', () => {

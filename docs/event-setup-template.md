@@ -102,6 +102,24 @@ unit, gender.
 match length, tie-break, points for winner / runner-up / semi-finalist / taking part,
 and the staff list (name, mobile, role, ground).
 
+**Times not fixed yet.** Kickoff may be left blank (TBA): the match is made with its ground and
+no time (it shows as needing one), and the date goes in the match note ("Match M1 · 2026-12-12,
+time to be set"). End is ignored without a kickoff.
+
+**Fixtures by hand.** A Draws row with Fixtures = "By hand" gets no fixtures at all (not
+generated, no schedule rows allowed): for a stage whose teams are not known yet, e.g. seeded
+teams who join after the pools. The organiser adds those matches in the schedule later.
+
+**Owners.** Only an owner can run an organisation's settings, members and billing, so a
+setup never leaves one without:
+- Host organisation set to **From sheet**: the Staff sheet must name at least one
+  **Org owner** (error `no_org_owner`; with Staff on Skip, `org_needs_owner`).
+  An Organiser alone runs the event but does not own the organisation.
+- Host organisation already on the platform with no owner, and the sheet adds none:
+  warning `org_without_owner`.
+- Inter: a competing organisation with no POC (and no owner already) ends up ownerless:
+  warning `competitor_without_owner`.
+
 ## Rules learned from the WNS sheet
 
 1. **One squad per unit per draw.** 10 WNS processes fielded 2–3 squads; each squad got

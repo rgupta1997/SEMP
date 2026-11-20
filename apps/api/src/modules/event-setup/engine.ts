@@ -588,6 +588,33 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
     }
   }
 
+  // Owners. Nobody but an owner can run an organisation's settings, members or billing.
+  // A new host needs an Org owner on the sheet (the validator refuses one without);
+  // these are the warnings: an existing host with no owner, and (inter) a competing
+  // organisation that no POC will own.
+  const ownedOrgs = new Set(allOrgIds.length
+    ? (await prisma.organization_members.findMany({
+      where: { organization_id: { in: allOrgIds }, role: 'owner', status: 'active' }, select: { organization_id: true },
+    })).map((m) => m.organization_id)
+    : []);
+  const staffUsed = bp.steps.staff !== 'skip';
+  if (orgId && !ownedOrgs.has(orgId) && !(staffUsed && bp.staff.some((s) => s.orgRole === 'owner'))) {
+    issue('warning', 'org_without_owner', `"${bp.org.name}" is on the platform but has no owner, and the Staff sheet adds none. Add a Staff row with Role "Org owner" so someone can run its settings, members and billing`, 'staff');
+  }
+  if (inter) {
+    const pocFor = new Set(staffUsed ? bp.staff.flatMap((s) => (s.eventRole === 'poc' && s.competitorKey ? [s.competitorKey] : [])) : []);
+    const ownerless = orgCompetitors.filter((c) => {
+      if (lc(c.name) === lc(bp.org.name) || pocFor.has(c.key)) return false;
+      const id = competitorIds.get(c.key);
+      return !id || !ownedOrgs.has(id);
+    });
+    if (ownerless.length) {
+      const names = ownerless.map((c) => `"${c.name}"`);
+      const shown = names.length > 6 ? `${names.slice(0, 6).join(', ')} and ${names.length - 6} more` : names.join(', ');
+      issue('warning', 'competitor_without_owner', `${shown} will have no owner: no POC on the Staff sheet speaks for ${ownerless.length === 1 ? 'it' : 'them'}${ownerless.some((c) => competitorIds.has(c.key)) ? ' (and the ones already on the platform have none)' : ''}. Add a POC row with "For organisation" so someone can run ${ownerless.length === 1 ? 'it' : 'each'}`, 'staff');
+    }
+  }
+
   // Emails are unique: two NEW accounts cannot share one, and the database would refuse the second.
   const newEmails = new Map<string, string[]>();
   for (const p of bp.people) if (!personIds.has(p.key) && p.email) newEmails.set(lc(p.email), [...(newEmails.get(lc(p.email)) ?? []), p.name]);
@@ -1410,11 +1437,13 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
           id: randomUUID(), tournament_discipline_id: drawId,
           home_team_id: team(g.entrantHome), away_team_id: team(g.entrantAway), winner_team_id: team(g.winnerToken),
           round: g.round, pool_number: null, bracket_position: g.bracketPosition, status: g.status,
-          scheduled_at: sheetRow ? new Date(`${sheetRow.date}T${sheetRow.kickoff}:00${f.utcOffset}`) : null,
-          duration_minutes: sheetRow?.minutes ?? null,
+          // No kickoff (TBA): no time, so the fixture shows as needing one.
+          scheduled_at: sheetRow?.kickoff ? new Date(`${sheetRow.date}T${sheetRow.kickoff}:00${f.utcOffset}`) : null,
+          duration_minutes: sheetRow?.minutes || null,
           venue_ground_id: sheetRow ? groundIdOf.get(sheetRow.groundKey) ?? null : null,
           official_id: sheetRow ? officialOn.get(sheetRow.groundKey) ?? null : null,
-          notes: sheetRow ? `Match ${sheetRow.matchId}` : null,
+          // The date has nowhere else to live without a time, so it goes in the note.
+          notes: sheetRow ? `Match ${sheetRow.matchId}${sheetRow.kickoff ? '' : ` · ${sheetRow.date}, time to be set`}` : null,
           match_no: sheetRow ? f.rows.indexOf(sheetRow) + 1 : null,
         };
       });
@@ -1510,14 +1539,18 @@ export async function verifyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, s
       continue;
     }
     const positioned = rows.filter((r) => r.bracket_position != null).length;
-    const byMatch = new Map(rows.filter((r) => r.notes?.startsWith('Match ')).map((r) => [r.notes!.slice(6), r]));
+    const byMatch = new Map(rows.filter((r) => r.notes?.startsWith('Match ')).map((r) => [r.notes!.slice(6).split(' · ')[0], r]));
     const officialOn = new Map(bp.staff.filter((s) => s.groundKey).map((s) => [s.groundKey!, m.keys[`staff:${s.key}`]]));
     for (const r of f.rows) {
       checked++;
       const fx = byMatch.get(r.matchId);
       if (!fx) { failures.push(`${r.matchId}: no fixture`); continue; }
-      const want = new Date(`${r.date}T${r.kickoff}:00${f.utcOffset}`).getTime();
-      if (fx.scheduled_at?.getTime() !== want) failures.push(`${r.matchId}: kickoff ${fx.scheduled_at?.toISOString()} is not ${r.date} ${r.kickoff}`);
+      if (!r.kickoff) {
+        if (fx.scheduled_at) failures.push(`${r.matchId}: has a kickoff (${fx.scheduled_at.toISOString()}) but the sheet left it to be set`);
+      } else {
+        const want = new Date(`${r.date}T${r.kickoff}:00${f.utcOffset}`).getTime();
+        if (fx.scheduled_at?.getTime() !== want) failures.push(`${r.matchId}: kickoff ${fx.scheduled_at?.toISOString()} is not ${r.date} ${r.kickoff}`);
+      }
       if (fx.venue_ground_id !== (m.keys[`ground:${r.groundKey}`] ?? null)) failures.push(`${r.matchId}: wrong ground`);
       if (officialOn.has(r.groundKey) && fx.official_id !== officialOn.get(r.groundKey)) failures.push(`${r.matchId}: official is not the ${r.groundKey} official`);
       for (const side of ['home', 'away'] as const) {

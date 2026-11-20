@@ -793,6 +793,30 @@ export function StandingsBoardSkeleton({ hero = false, rows = 8 }: { hero?: bool
   );
 }
 
+/** Participants: banner, chips, toolbar and a few organisation cards. */
+export function ParticipantsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      <div aria-hidden className="flex animate-pulse flex-col gap-5 rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 p-4 sm:p-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2.5"><span className="block h-2.5 w-24 rounded bg-white/25" /><span className="block h-9 w-44 rounded bg-white/30" /><span className="block h-3.5 w-60 max-w-full rounded bg-white/20" /><span className="block h-1.5 w-64 max-w-full rounded-full bg-white/20" /></div>
+        <div className="space-y-3">
+          <div className="flex md:justify-end">{Array.from({ length: 6 }, (_, i) => <span key={i} className="-ml-2 block h-9 w-9 rounded-full bg-white/25 ring-2 ring-brand-700 first:ml-0" />)}</div>
+          <div className="flex gap-2">{['w-28', 'w-28', 'w-32'].map((w, i) => <span key={i} className={cn('block h-8 rounded-full bg-white/10 ring-1 ring-white/15', w)} />)}</div>
+        </div>
+      </div>
+      <ChipsSkeleton />
+      <div className="flex flex-wrap gap-2"><Skel className="h-9 w-72 max-w-full rounded-lg" /><Skel className="h-9 w-48 rounded-lg" /></div>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} aria-hidden className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900">
+          <Skel className="h-9 w-9 rounded-full" />
+          <div className="flex-1 space-y-1.5"><Skel className="h-3.5 w-52 max-w-[70%]" /><Skel className="h-2.5 w-32" /></div>
+          <Skel className="hidden h-6 w-24 rounded-full sm:block" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const CHIP_WIDTHS = ['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'];
 const ChipsSkeleton = () => (
   <div className="flex gap-2 overflow-hidden">

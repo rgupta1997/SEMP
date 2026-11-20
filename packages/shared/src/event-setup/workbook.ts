@@ -51,7 +51,7 @@ function instructionsGrid(type: SetupEventType, steps: SetupSteps): SetupGrid {
     ['1. Event: one setting per row. Write each value in the Value column, next to its Field.'],
     ['2. Draws: one row per sport and discipline that is played (Football / Mixed).'],
     [`3. Squads: one row per squad: who it plays for (its ${competitor}), its captain, vice-captain and players. A ${competitor} enters at most one squad per draw.`],
-    [`4. Staff: who runs the event. At least one Organiser or Org owner. An Official scores every match on the ground written next to them.${type === 'inter' ? ' Each organisation\'s POC goes here too, with "For organisation".' : ''}`],
+    [`4. Staff: who runs the event. ${steps.org === 'sheet' ? 'At least one Org owner: the person who owns the host organisation on Sportagon (and runs its settings, members and billing); Organisers only run the event.' : 'At least one Organiser or Org owner.'} An Official scores every match on the ground written next to them.${type === 'inter' ? ' Each organisation\'s POC goes here too, with "For organisation"; a POC becomes that organisation\'s owner.' : ''}`],
     ['5. People (optional): contacts for players. A row is linked to Squads by ID, else by the exact name.'],
     ['6. Schedule (optional): your own match list for a knockout. Later rounds say "Winner of <Match ID>"; a squad with a bye simply appears in round two. Leave it empty and the draw is generated from the squads.'],
     [],

@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
-import { PageSkeleton } from '../../features/schedule/ScheduleParts';
+import { PageSkeleton, ParticipantsSkeleton } from '../../features/schedule/ScheduleParts';
 import { api } from '../../lib/api';
 import { archiveDaysLeft, archivePurgeDate, citiesShort } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
@@ -53,6 +53,9 @@ interface EventCtx {
 export const useEvent = () => useOutletContext<EventCtx>();
 
 // The legal "next" status + button label for the go-live flow.
+/** Event pages that open on their own hero, without the back / status / lifecycle row. */
+const BARE_SEGMENTS = new Set(['schedule', 'results', 'standings', 'participants']);
+
 const NEXT_STATUS: Record<string, { to: string; label: string } | null> = {
   draft: { to: 'registration_open', label: 'Open registration' },
   registration_open: { to: 'ongoing', label: 'Start championship' },
@@ -105,6 +108,7 @@ export function EventLayout() {
     // Schedule and Results show their own layout shimmering rather than a lone spinner.
     const seg = parseEventSegment(pathname, eventId!);
     if (seg === 'schedule' || seg === 'results' || seg === 'standings') return <PageSkeleton kind={seg} />;
+    if (seg === 'participants') return <ParticipantsSkeleton />;
     return <Spinner />;
   }
 
@@ -122,9 +126,8 @@ export function EventLayout() {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
-  // Schedule, Results and Standings open straight on their content: back, status and the
-  // lifecycle button stay on the other event pages.
-  const bareHeader = segment === 'schedule' || segment === 'results' || segment === 'standings';
+  // These open straight on their content: back, status and the lifecycle button stay on the other event pages.
+  const bareHeader = !!segment && BARE_SEGMENTS.has(segment);
 
   // An archived event is read-only; no lifecycle step is offered until it is retrieved.
   const archivedAt = championship.archived_at ?? null;
