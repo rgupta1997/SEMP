@@ -337,7 +337,8 @@ export function AppShell() {
               />
             </div>
           )}
-          <nav className="flex-1 overflow-y-auto px-3 py-4">
+          {/* Collapsed: no visible scrollbar (it still scrolls), or its width pushes the icons off the logo's centre line. */}
+          <nav className={cn('flex-1 overflow-y-auto px-3 py-4', railed && 'md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden')}>
             {!isPlatform && ws.active && contextNav.map((it) => {
               const href = hrefFor(ws.active!, it);
               const Icon = navIcon(it.key);
@@ -432,19 +433,20 @@ export function AppShell() {
         {deskMenuOpen && createPortal(
           <>
             <div className="fixed inset-0 z-scrim" onClick={() => setDeskMenuOpen(false)} />
-            <div className="animate-dropdown fixed bottom-3 z-popover w-64 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900"
+            <div className="animate-dropdown fixed bottom-3 z-popover w-56 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900"
               style={{ left: railed ? 80 : 248 }}>
-              <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
-                <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
-                {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
+              <div className="border-b border-slate-100 px-3 py-2 dark:border-slate-800">
+                <div className="truncate text-[13px] font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
+                <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
+                {ctx.user.phone && <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
               </div>
               {SHOW_MY_PLAN && (
                 <button onClick={() => { setDeskMenuOpen(false); navigate('/plans'); }}
-                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">My plan</button>
+                  className="w-full px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">My plan</button>
               )}
-              <div className="px-4 py-2"><RoleSwitcher /></div>
-              <button onClick={signOut} className="w-full px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
+              {/* empty:hidden - RoleSwitcher renders nothing for single-role users. */}
+              <div className="px-3 py-2 empty:hidden"><RoleSwitcher /></div>
+              <button onClick={signOut} className="w-full px-3 py-2 text-left text-[13px] font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
             </div>
           </>,
           document.body,
@@ -516,7 +518,7 @@ export function AppShell() {
                         <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
                         {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
                       </button>
-                      <div className="px-4 py-2 sm:hidden"><RoleSwitcher /></div>
+                      <div className="px-4 py-2 empty:hidden sm:hidden"><RoleSwitcher /></div>
                       <button onClick={signOut} className="w-full px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                     </div>
                   </>

@@ -157,7 +157,7 @@ export function SportIcon({ kind, size = 28, className }: { kind: Kit; size?: nu
  * Faint line-drawn sports kit behind the banner: purely decorative. A wide layout
  * anchored right (the headline stays clean) and a compact one for a phone.
  */
-function SportsDecor() {
+export function SportsDecor() {
   return (
     <>
       <svg className="pointer-events-none absolute inset-0 hidden h-full w-full text-white/[0.09] sm:block" viewBox="0 0 1400 220" preserveAspectRatio="xMaxYMid slice" {...SVG_PROPS}>
@@ -345,7 +345,9 @@ export function TeamChips({ sides, value, onChange }: { sides: TeamSide[]; value
 }
 
 /** Sports as multi-select filter chips with live dots; "All sports" first clears them. */
-export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2 }: {
+export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2, showCounts = true }: {
+  /** Off where a match count means nothing (Standings). */
+  showCounts?: boolean;
   sports: Array<{ id: string; name: string; icon?: string | null; live: number; total: number }>;
   /** The picked ids; empty means all. */
   value: string[]; onChange: (ids: string[]) => void;
@@ -371,7 +373,7 @@ export function SportChips({ sports, value, onChange, allLabel = 'All sports', a
         {label}
         {live > 0
           ? <span className={cn('flex items-center gap-1 rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300')}><LiveDot className="h-1.5 w-1.5" />{live}</span>
-          : <span className={cn('rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{total}</span>}
+          : showCounts && <span className={cn('rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{total}</span>}
       </button>
     );
   };
@@ -764,8 +766,58 @@ export function SportSectionSkeleton({ cards = 3 }: { cards?: number }) {
   );
 }
 
-/** Schedule or Results, before anything has loaded. */
-export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' }) {
+/** Standings: the podium hero (`hero`), or the leaderboard rows. */
+export function StandingsBoardSkeleton({ hero = false, rows = 8 }: { hero?: boolean; rows?: number }) {
+  if (hero) {
+    return (
+      <div aria-hidden className="flex animate-pulse flex-col gap-5 rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 px-5 pt-5 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-2.5 pb-6"><span className="block h-2.5 w-36 rounded bg-white/25" /><span className="block h-8 w-40 rounded bg-white/30" /><span className="block h-3.5 w-64 max-w-full rounded bg-white/20" /><span className="block h-2.5 w-48 rounded bg-white/20" /></div>
+        <div className="flex items-end justify-center gap-3 md:w-[26rem]">
+          {['h-16 sm:h-20', 'h-24 sm:h-28', 'h-11 sm:h-14'].map((h, i) => (
+            <div key={i} className="flex w-1/3 flex-col items-center gap-1.5"><span className="block h-10 w-10 rounded-full bg-white/25" /><span className="block h-3 w-12 rounded bg-white/20" /><span className={cn('mt-1 block w-full rounded-t-xl bg-white/10', h)} /></div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div aria-hidden>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 dark:border-slate-800">
+          <Skel className="h-6 w-6 rounded-full" /><Skel className="h-9 w-9 rounded-full" />
+          <div className="flex-1 space-y-1.5"><Skel className="h-3.5 w-44 max-w-[60%]" /><Skel className="h-3 w-32" /></div>
+          <Skel className="hidden h-3 w-16 sm:block" /><Skel className="h-6 w-10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const CHIP_WIDTHS = ['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'];
+const ChipsSkeleton = () => (
+  <div className="flex gap-2 overflow-hidden">
+    {CHIP_WIDTHS.map((w, i) => <Skel key={i} className={cn('h-9 shrink-0 rounded-full', w)} />)}
+  </div>
+);
+
+/** Schedule, Results or Standings, before anything has loaded. */
+export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' | 'standings' }) {
+  if (kind === 'standings') {
+    return (
+      <div role="status" aria-label="Loading" className="space-y-5">
+        <StandingsBoardSkeleton hero />
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800"><Skel className="h-4 w-24" /><Skel className="h-7 w-32 rounded-lg" /></div>
+            <StandingsBoardSkeleton />
+          </div>
+          <div className="hidden space-y-2 rounded-2xl border border-slate-200 bg-white p-3 xl:block dark:border-slate-800 dark:bg-slate-900">
+            {Array.from({ length: 9 }, (_, i) => <Skel key={i} className="h-7 w-full rounded-lg" />)}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div role="status" aria-label="Loading" className="space-y-5">
       {kind === 'schedule' && <Skel className="h-9 w-56 rounded-full" />}
@@ -778,12 +830,9 @@ export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' }) {
           {Array.from({ length: 4 }, (_, i) => <Skel key={i} className="h-36 w-64 shrink-0 rounded-xl" />)}
         </div>
       )}
-      <div className="flex gap-2 overflow-hidden">
-        {['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'].map((w, i) => <Skel key={i} className={cn('h-9 shrink-0 rounded-full', w)} />)}
-      </div>
+      <ChipsSkeleton />
       <SportSectionSkeleton />
       <SportSectionSkeleton cards={2} />
     </div>
   );
 }
-

@@ -7,9 +7,9 @@ import { Badge, Button, Modal, Spinner, Textarea, cn, toast } from './ui';
 import { TeamAvatar } from '../features/schedule/ScheduleParts';
 
 // Shared table styling, so pools and the cross-group table read the same.
-const CARD = 'min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
-const HEAD_ROW = 'bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800/40 dark:text-slate-500';
-const ROW = 'border-t border-slate-100 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30';
+export const CARD = 'min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
+export const HEAD_ROW = 'bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800/40 dark:text-slate-500';
+export const ROW = 'border-t border-slate-100 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30';
 
 /** A team in a table: its badge and name. */
 function TeamCell({ name, short }: { name: string; short: string | null }) {
@@ -25,7 +25,7 @@ function Diff({ v }: { v: number }) {
   return <span className={cn('tabular-nums', v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400')}>{v > 0 ? '+' : ''}{formatPoints(v)}</span>;
 }
 /** Points, the column people read first. */
-function Pts({ v }: { v: number }) {
+export function Pts({ v }: { v: number }) {
   return <span className="inline-grid min-w-8 place-items-center rounded-md bg-brand-50 px-1.5 py-0.5 text-[13px] font-black tabular-nums text-brand-700 dark:bg-brand-500/15 dark:text-brand-200">{formatPoints(v)}</span>;
 }
 

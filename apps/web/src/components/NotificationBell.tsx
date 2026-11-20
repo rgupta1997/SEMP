@@ -80,7 +80,10 @@ export function NotificationBell({ className }: {
     <>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={cn('relative grid h-9 w-9 place-items-center rounded-lg', className ?? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')}
+        className={cn('relative grid h-9 w-9 place-items-center rounded-lg', className ?? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+          // Selected while the drawer is open: brand-coloured bell only. ! because cn() does not override the caller's colours.
+          open && '!bg-transparent !text-brand-600 dark:!text-brand-300')}
+        aria-expanded={open}
         aria-label={
           unread > 0
             ? `Notifications (${unread} unread)`
@@ -88,7 +91,7 @@ export function NotificationBell({ className }: {
         }
         title="Notifications"
       >
-        <Bell size={18} aria-hidden />
+        <Bell size={18} aria-hidden fill={open ? 'currentColor' : 'none'} />
 
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">

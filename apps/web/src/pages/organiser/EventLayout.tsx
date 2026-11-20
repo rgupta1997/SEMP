@@ -104,7 +104,7 @@ export function EventLayout() {
   if (isLoading || !championship) {
     // Schedule and Results show their own layout shimmering rather than a lone spinner.
     const seg = parseEventSegment(pathname, eventId!);
-    if (seg === 'schedule' || seg === 'results') return <PageSkeleton kind={seg} />;
+    if (seg === 'schedule' || seg === 'results' || seg === 'standings') return <PageSkeleton kind={seg} />;
     return <Spinner />;
   }
 
@@ -122,9 +122,9 @@ export function EventLayout() {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
-  // Schedule and Results open straight on their content: back, status and the
+  // Schedule, Results and Standings open straight on their content: back, status and the
   // lifecycle button stay on the other event pages.
-  const bareHeader = segment === 'schedule' || segment === 'results';
+  const bareHeader = segment === 'schedule' || segment === 'results' || segment === 'standings';
 
   // An archived event is read-only; no lifecycle step is offered until it is retrieved.
   const archivedAt = championship.archived_at ?? null;

@@ -1,7 +1,9 @@
 import { Fragment, useState } from 'react';
 import { ChevronDown, Trophy } from 'lucide-react';
-import { Avatar, Badge, EmptyState, Table, cn } from './ui';
+import { EmptyState, cn } from './ui';
 import { StandingsBreakdown } from './StandingsBreakdown';
+import { CARD, HEAD_ROW, Pts, ROW } from './GroupTables';
+import { TeamAvatar } from '../features/schedule/ScheduleParts';
 
 // Minimal shape shared by the organiser + participant standings rows.
 export interface MedalStandingRow {
@@ -48,12 +50,20 @@ export function rankMedals(rows: MedalStandingRow[], opts?: { includeAll?: boole
     .sort((a, b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.row.points - a.row.points);
 }
 
+const MEDALS = ['gold', 'silver', 'bronze'] as const;
+const Count = ({ n }: { n: number }) => (n ? <>{n}</> : <span className="text-slate-300 dark:text-slate-600">-</span>);
+
 // Olympic-style medal tally: one row per organisation. Reads the same standings rows the
 // points table uses (no extra fetch). Each row expands to its breakdown - which sports /
 // disciplines earned the medals - via the shared StandingsBreakdown (needs base/scope).
-export function StandingsMedalTable({ rows, base, scope, scopeId }:
-  { rows: MedalStandingRow[]; base: string; scope: string; scopeId: string | null }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+// `expanded` / `onToggle` let a page drive which row is open; without them it keeps its own.
+export function StandingsMedalTable({ rows, base, scope, scopeId, expanded: openId, onToggle }: {
+  rows: MedalStandingRow[]; base: string; scope: string; scopeId: string | null;
+  expanded?: string | null; onToggle?: (id: string) => void;
+}) {
+  const [own, setOwn] = useState<string | null>(null);
+  const expanded = openId !== undefined ? openId : own;
+  const toggle = onToggle ?? ((id: string) => setOwn((cur) => (cur === id ? null : id)));
   // Show every org (medal winners ranked first, then the rest by points), not just medallists.
   const ranked = rankMedals(rows, { includeAll: true });
 
@@ -61,116 +71,93 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
     return <EmptyState icon={<Trophy size={24} />} title="No standings yet" description="The medal tally fills in as ranking events and finals are decided." />;
   }
 
-  return (
-    <>
-    {/* ---------------- phone ----------------
-        Seven columns - #, name, gold, silver, bronze, total, points - is a drag on a
-        390px screen, and the medal counts (the entire point of a medal tally) are the
-        part that ends up off it. One row instead: position, short name, the three
-        counts as coloured pips, and the total. Tapping still opens the breakdown. */}
-    <div className="sm:hidden">
-      {ranked.map((r, i) => {
-        const isOpen = expanded === r.row.entity_id;
-        return (
-          <div
-            key={r.row.entity_id}
-            className={cn('border-t border-slate-100 first:border-t-0 dark:border-slate-800',
-              !isOpen && i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}
-          >
-            <button
-              type="button"
-              aria-expanded={isOpen}
-              onClick={() => setExpanded(isOpen ? null : r.row.entity_id)}
-              className={cn('flex w-full items-center gap-2.5 px-1 py-2.5 text-left', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
-            >
-              <span className="w-5 shrink-0 text-center text-[13px] font-bold tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
-                  {r.row.name || r.row.short_name}
-                </span>
-                {/* Pips rather than three numbered columns: the medal's colour and
-                    its count in ~22px each, which is what the columns were spending
-                    64px on. The count is always shown, so colour is never the only
-                    signal. */}
-                <span className="t-meta mt-0.5 flex items-center gap-2.5 tabular-nums">
-                  {(['gold', 'silver', 'bronze'] as const).map((m) => (
-                    <span key={m} className="inline-flex items-center gap-1">
-                      <span className={`medal-pip medal-pip--${m}`} />
-                      {r[m] || 0}
-                    </span>
-                  ))}
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">{r.total} total</span>
-                </span>
-              </span>
-              <Badge tone="brand">{r.row.points}</Badge>
-              <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
-            </button>
-            {isOpen && (
-              <div className="pb-3">
-                <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} showConverted />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+  const breakdown = (id: string) => <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={id} showConverted />;
 
-    <div className="hidden sm:block">
-    <Table>
-      <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        <tr>
-          <th className="px-4 py-3">#</th>
-          <th className="px-4 py-3">Organization</th>
-          <th className="px-3 py-3 text-center" title="Gold">🥇</th>
-          <th className="px-3 py-3 text-center" title="Silver">🥈</th>
-          <th className="px-3 py-3 text-center" title="Bronze">🥉</th>
-          <th className="px-3 py-3 text-center">Total</th>
-          <th className="px-4 py-3 text-center">Pts</th>
-        </tr>
-      </thead>
-      <tbody>
+  return (
+    <div className={cn(CARD, 'rounded-2xl')}>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3">
+        <span className="text-sm font-black text-slate-800 dark:text-slate-100">Medal tally</span>
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">Ranked by gold, then silver, then bronze · tap a row for the events</span>
+      </div>
+
+      {/* Phone: medal counts as coloured pips, so the counts never scroll off. */}
+      <div className="sm:hidden">
         {ranked.map((r, i) => {
-          const isOpen = expanded === r.row.entity_id;
+          const open = expanded === r.row.entity_id;
           return (
-            <Fragment key={r.row.entity_id}>
-              <tr
-                onClick={() => setExpanded(isOpen ? null : r.row.entity_id)}
-                className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40',
-                  isOpen ? 'bg-slate-50 dark:bg-slate-800/40' : i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}
-                title="Show which sports & disciplines earned these medals"
-              >
-                <td className="px-4 py-3 font-bold tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                    <Avatar name={r.row.name} size={30} />
-                    <span className="min-w-0">
-                      <span className="block font-medium text-slate-800 dark:text-slate-200">{r.row.name}</span>
-                      {r.row.org_unit?.parent && (
-                        <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.row.org_unit.parent}</span>
-                      )}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-3 py-3 text-center font-semibold tabular-nums text-slate-700 dark:text-slate-200">{r.gold || <span className="text-slate-300 dark:text-slate-600">-</span>}</td>
-                <td className="px-3 py-3 text-center font-semibold tabular-nums text-slate-700 dark:text-slate-200">{r.silver || <span className="text-slate-300 dark:text-slate-600">-</span>}</td>
-                <td className="px-3 py-3 text-center font-semibold tabular-nums text-slate-700 dark:text-slate-200">{r.bronze || <span className="text-slate-300 dark:text-slate-600">-</span>}</td>
-                <td className="px-3 py-3 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">{r.total}</td>
-                <td className="px-4 py-3 text-center"><Badge tone="brand">{r.row.points}</Badge></td>
-              </tr>
-              {isOpen && (
-                <tr className="bg-slate-50/60 dark:bg-slate-800/20">
-                  <td colSpan={7} className="px-4 pb-4 pt-0">
-                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} showConverted />
-                  </td>
-                </tr>
-              )}
-            </Fragment>
+            <div key={r.row.entity_id} data-row={r.row.entity_id}
+              className={cn('border-t border-slate-100 dark:border-slate-800', !open && i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}>
+              <button type="button" aria-expanded={open} onClick={() => toggle(r.row.entity_id)}
+                className={cn('flex w-full items-center gap-2.5 px-3 py-2.5 text-left', open && 'bg-slate-50 dark:bg-slate-800/40')}>
+                <span className="w-6 shrink-0 text-center text-[13px] font-bold tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
+                <TeamAvatar name={r.row.name} short={r.row.short_name} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-semibold text-slate-800 dark:text-slate-100">{r.row.name || r.row.short_name}</span>
+                  <span className="mt-0.5 flex items-center gap-2.5 text-[11px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+                    {MEDALS.map((m) => (
+                      <span key={m} className="inline-flex items-center gap-1"><span className={`medal-pip medal-pip--${m}`} />{r[m] || 0}</span>
+                    ))}
+                    <span className="text-slate-600 dark:text-slate-300">{r.total} total</span>
+                  </span>
+                </span>
+                <Pts v={r.row.points} />
+                <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', open && 'rotate-180')} />
+              </button>
+              {open && <div className="px-3 pb-3">{breakdown(r.row.entity_id)}</div>}
+            </div>
           );
         })}
-      </tbody>
-    </Table>
+      </div>
+
+      <div className="hidden overflow-x-auto sm:block">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className={HEAD_ROW}>
+              <th className="w-14 px-4 py-2 text-left">#</th>
+              <th className="px-2 py-2 text-left">Team</th>
+              {MEDALS.map((m) => (
+                <th key={m} className="w-14 px-2 py-2 text-center" title={m[0].toUpperCase() + m.slice(1)}>
+                  <span className={`medal-pip medal-pip--${m} inline-block !h-3 !w-3 align-middle`} aria-label={m} />
+                </th>
+              ))}
+              <th className="w-16 px-2 py-2 text-center">Total</th>
+              <th className="w-16 px-2 py-2 text-center">Pts</th>
+              <th className="w-10 px-3 py-2" aria-label="Expand" />
+            </tr>
+          </thead>
+          <tbody>
+            {ranked.map((r, i) => {
+              const open = expanded === r.row.entity_id;
+              return (
+                <Fragment key={r.row.entity_id}>
+                  <tr data-row={r.row.entity_id} onClick={() => toggle(r.row.entity_id)} title="Show which sports & disciplines earned these medals"
+                    className={cn(ROW, 'cursor-pointer', open ? 'bg-slate-50 dark:bg-slate-800/40' : i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}>
+                    <td className="px-4 py-2.5 font-bold tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</td>
+                    <td className="px-2 py-2.5">
+                      <span className="flex min-w-0 items-center gap-3">
+                        <TeamAvatar name={r.row.name} short={r.row.short_name} />
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold text-slate-800 dark:text-slate-100">{r.row.name}</span>
+                          {r.row.org_unit?.parent && <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{r.row.org_unit.parent}</span>}
+                        </span>
+                      </span>
+                    </td>
+                    {MEDALS.map((m) => <td key={m} className="px-2 py-2.5 text-center font-semibold tabular-nums text-slate-700 dark:text-slate-200"><Count n={r[m]} /></td>)}
+                    <td className="px-2 py-2.5 text-center font-black tabular-nums text-slate-800 dark:text-slate-100">{r.total}</td>
+                    <td className="px-2 py-2.5 text-center"><Pts v={r.row.points} /></td>
+                    <td className="px-3 py-2.5"><ChevronDown size={16} className={cn('text-slate-400 transition-transform', open && 'rotate-180')} /></td>
+                  </tr>
+                  {open && (
+                    <tr className="bg-slate-50/60 dark:bg-slate-800/20">
+                      <td colSpan={8} className="px-4 pb-4 pt-0">{breakdown(r.row.entity_id)}</td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
-    </>
   );
 }

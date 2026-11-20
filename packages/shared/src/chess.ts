@@ -128,6 +128,8 @@ export function describeTimeControl(tc: unknown): string | null {
 /** 2.5 -> "2½", 0.5 -> "½", 3 -> "3". Whole numbers (every other sport) are untouched. */
 export function formatPoints(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '';
+  // Format the size, then sign it: floor(-1.5) is -2, which printed "-2½".
+  if (n < 0) return `-${formatPoints(-n)}`;
   const whole = Math.floor(n);
   const half = Math.abs(n - whole - 0.5) < 1e-9;
   if (!half) return String(Math.round(n * 100) / 100);
