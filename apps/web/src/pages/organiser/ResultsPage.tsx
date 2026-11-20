@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, isKnockoutRound, KHO_END_LABEL, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, isKnockoutRound, isRankingSport, KHO_END_LABEL, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
@@ -278,13 +278,30 @@ export function ResultsPage() {
   const [sportId, setSportId] = useUrlState<string>('sport', '');
   const pickedSports = useMemo(() => (sportId ? sportId.split(',') : []), [sportId]);
 
+  // A ranking event (swimming, powerlifting) has no home/away: its squads are the ones
+  // entered in its draw. Knockout TBD slots stay team-less, as they should.
+  const { data: squads = [] } = useApi<Side[] & any[]>(`/teams?championship_id=${eventId}`);
+  const entrants = useMemo(() => {
+    const m = new Map<string, Side[]>();
+    for (const sq of squads as any[]) {
+      for (const e of sq.team_entries ?? []) {
+        if (e.tournament_discipline_id) m.set(e.tournament_discipline_id, [...(m.get(e.tournament_discipline_id) ?? []), sq]);
+      }
+    }
+    return m;
+  }, [squads]);
+  const squadsIn = (f: ResultRow): Side[] => (f.home || f.away
+    ? [f.home, f.away].filter((s): s is Side => !!s)
+    : isRankingSport(f.sport) && f.tournament_discipline_id ? entrants.get(f.tournament_discipline_id) ?? [] : []);
+  const playedBy = (f: ResultRow, ids: Set<string>) => squadsIn(f).some((s) => ids.has(s.id));
+
   // Institute badges, the same as Schedule: every squad an institute (or batch) fields.
   const [sideKey, setSideKey] = useUrlState<string>('side', '');
   const sides = useMemo(() => {
     const map = new Map<string, TeamSide>();
     for (const f of fixtures) {
       if (!RESULTABLE.has(f.status)) continue;
-      for (const s of [f.home, f.away]) {
+      for (const s of squadsIn(f)) {
         if (!s) continue;
         const key = s.org_units?.id ? `u:${s.org_units.id}` : `o:${s.organizations?.short_name || s.organizations?.name || s.id}`;
         const e = map.get(key) ?? { key, label: teamCode(s), full: teamLabel(s), logo: null, ids: new Set<string>(), matches: 0, live: 0 };
@@ -295,19 +312,21 @@ export function ResultsPage() {
     for (const f of fixtures) {
       if (!RESULTABLE.has(f.status)) continue;
       for (const e of map.values()) {
-        if ((f.home && e.ids.has(f.home.id)) || (f.away && e.ids.has(f.away.id))) { e.matches += 1; if (f.status === 'live') e.live += 1; }
+        if (playedBy(f, e.ids)) { e.matches += 1; if (f.status === 'live') e.live += 1; }
       }
     }
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  }, [fixtures]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixtures, entrants]);
   const pickedSide = sides.find((s) => s.key === sideKey);
 
   const rows = useMemo(
     () => fixtures.filter((f) =>
       (!tournamentId || f.tournament?.id === tournamentId) &&
       (!pickedSports.length || (!!f.sport && pickedSports.includes(f.sport))) &&
-      (!pickedSide || (!!f.home && pickedSide.ids.has(f.home.id)) || (!!f.away && pickedSide.ids.has(f.away.id)))),
-    [fixtures, tournamentId, pickedSports, pickedSide],
+      (!pickedSide || playedBy(f, pickedSide.ids))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fixtures, tournamentId, pickedSports, pickedSide, entrants],
   );
 
   // Group matches by their draw (sport + discipline) so the list reads as sections
@@ -580,7 +599,7 @@ export function ResultsPage() {
     for (const f of fixtures) {
       if (!f.sport || !RESULTABLE.has(f.status)) continue;
       if (tournamentId && f.tournament?.id !== tournamentId) continue;
-      if (pickedSide && !((f.home && pickedSide.ids.has(f.home.id)) || (f.away && pickedSide.ids.has(f.away.id)))) continue;
+      if (pickedSide && !playedBy(f, pickedSide.ids)) continue;
       const e = m.get(f.sport) ?? { id: f.sport, name: f.sport, icon: f.sport_icon, live: 0, total: 0 };
       e.total += 1; if (f.status === 'live') e.live += 1;
       m.set(f.sport, e);

@@ -683,7 +683,9 @@ const sortTeamsForPicker = (teams: any[]) => [...teams].sort((a, b) =>
 /** A fixture the given team plays in. */
 /** The picked team or institute, as the squad ids it covers; null shows everyone. */
 type TeamPick = Set<string> | null;
-const involves = (f: any, pick: TeamPick) => !pick || pick.has(f.home_team_id) || pick.has(f.away_team_id);
+// A ranking event has no two sides; its entered squads ride along as entrant_team_ids.
+const involves = (f: any, pick: TeamPick) => !pick || pick.has(f.home_team_id) || pick.has(f.away_team_id)
+  || (f.entrant_team_ids ?? []).some((id: string) => pick.has(id));
 
 function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamPick = null, phaseFilter = '', onTimeline }:
   { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean;
@@ -1177,7 +1179,7 @@ export function SchedulePage() {
   // One championship-wide fixtures request feeds the timeline AND every manage-view
   // DrawCard (sliced per draw), instead of a fixtures request per draw.
   const fixturesPath = `/championships/${eventId}/fixtures`;
-  const { data: allFixtures = [], isLoading: fixturesLoading } = useApi<any[]>(fixturesPath);
+  const { data: rawFixtures = [], isLoading: fixturesLoading } = useApi<any[]>(fixturesPath);
   // All draws for the championship in one request - feeds the timeline rows and each
   // manage-view SportBlock (replaces one disciplines query per sport).
   const { data: allDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
@@ -1210,6 +1212,21 @@ export function SchedulePage() {
   // what actually keeps a freshly generated draw from painting real fixtures
   // against a team list that hasn't caught up yet (EOS-131's "blank league table").
   const { data: teams = [], isFetching: teamsLoading } = useApi<any[]>(teamsPath);
+  // Ranking events (swimming, powerlifting) have no home/away: who is in one comes from
+  // the squads entered in its draw. Knockout TBD slots stay team-less, as they should.
+  const allFixtures = useMemo(() => {
+    const rankingDraws = new Set(allDraws.filter((d: any) => isRankingSport(d.tournament_sports?.sports?.name)).map((d: any) => d.id));
+    if (!rankingDraws.size) return rawFixtures;
+    const entrants = new Map<string, string[]>();
+    for (const tm of teams) {
+      for (const e of tm.team_entries ?? []) {
+        if (!rankingDraws.has(e.tournament_discipline_id)) continue;
+        entrants.set(e.tournament_discipline_id, [...(entrants.get(e.tournament_discipline_id) ?? []), tm.id]);
+      }
+    }
+    return rawFixtures.map((fx: any) => (rankingDraws.has(fx.tournament_discipline_id) && !fx.home_team_id && !fx.away_team_id
+      ? { ...fx, entrant_team_ids: entrants.get(fx.tournament_discipline_id) ?? [] } : fx));
+  }, [rawFixtures, allDraws, teams]);
   const { data: grounds = [] } = useApi<Ground[]>(`/championships/${eventId}/grounds`);
   // Venues come from the venues list directly (not derived from grounds) so a venue
   // with no courts yet still appears in the fixture's venue picker.
@@ -1269,7 +1286,7 @@ export function SchedulePage() {
   // opening a match and pressing Back keeps it.
   const [teamFilter, setTeamFilter] = useUrlState<string>('team', '');
   const teamOptions = useMemo(() => {
-    const inPlay = new Set(allFixtures.flatMap((f: any) => [f.home_team_id, f.away_team_id]).filter(Boolean));
+    const inPlay = new Set(allFixtures.flatMap((f: any) => [f.home_team_id, f.away_team_id, ...(f.entrant_team_ids ?? [])]).filter(Boolean));
     return sortTeamsForPicker(teams.filter((t) => inPlay.has(t.id)));
   }, [allFixtures, teams]);
 
@@ -1289,7 +1306,7 @@ export function SchedulePage() {
     for (const f of allFixtures) {
       if (!realMatch(f)) continue;
       for (const s of map.values()) {
-        if (s.ids.has(f.home_team_id) || s.ids.has(f.away_team_id)) { s.matches += 1; if (f.status === 'live') s.live += 1; }
+        if (involves(f, s.ids)) { s.matches += 1; if (f.status === 'live') s.live += 1; }
       }
     }
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }));
@@ -1331,7 +1348,7 @@ export function SchedulePage() {
 
   // The picked institute's squads, with their sport and match counts, for the squad chips.
   const squadChips = pickedSide ? teamOptions.filter((t) => pickedSide.ids.has(t.id)).map((t) => {
-    const mine = allFixtures.filter((f: any) => realMatch(f) && (f.home_team_id === t.id || f.away_team_id === t.id));
+    const mine = allFixtures.filter((f: any) => realMatch(f) && involves(f, new Set([t.id])));
     // The institute is already picked, so "IIMB Football Men's" reads "Football Men's".
     const name = t.name.startsWith(pickedSide.label + ' ') ? t.name.slice(pickedSide.label.length + 1) : t.name;
     return { id: t.id, name, icon: t.sports?.icon ?? sportIcon(t.sport_id), live: mine.filter((f: any) => f.status === 'live').length, total: mine.length };
