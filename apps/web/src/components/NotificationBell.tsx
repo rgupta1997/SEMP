@@ -25,11 +25,21 @@ import {
 // Reads/mutations go through the shared `notificationHooks` (packages/notifications)
 // instead of a local implementation, so this stays in sync with the rest of the app
 // (Compose modal, Realtime provider) without duplicating query-key logic.
-export function NotificationBell({ className }: {
+export function NotificationBell({ className, open: openProp, onOpenChange, hideTrigger = false }: {
   /** Trigger styling where the bell sits (the sidebar footer is darker than a header). */
   className?: string;
+  /** Controlled from outside (the phone account sheet opens the drawer). */
+  open?: boolean; onOpenChange?: (open: boolean) => void;
+  /** Drawer only: something else opens it. */
+  hideTrigger?: boolean;
 } = {}) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const setOpen = (v: boolean | ((o: boolean) => boolean)) => {
+    const next = typeof v === 'function' ? v(open) : v;
+    if (openProp === undefined) setOwnOpen(next);
+    onOpenChange?.(next);
+  };
   const [composing, setComposing] = useState(false);
 
   const { data: unreadCount } = notificationHooks.useUnreadCount();
@@ -78,7 +88,7 @@ export function NotificationBell({ className }: {
 
   return (
     <>
-      <button
+      {!hideTrigger && <button
         onClick={() => setOpen((o) => !o)}
         className={cn('relative grid h-9 w-9 place-items-center rounded-lg', className ?? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
           // Selected while the drawer is open: brand-coloured bell only. ! because cn() does not override the caller's colours.
@@ -98,7 +108,7 @@ export function NotificationBell({ className }: {
             {unread > 99 ? '99+' : unread}
           </span>
         )}
-      </button>
+      </button>}
 
       {/* Portalled: the sidebar clips and transforms its children, which would trap a fixed drawer. */}
       {createPortal(<>

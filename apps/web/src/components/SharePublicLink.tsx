@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { Link2, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { publicUrl } from '../lib/native';
-import { Button, toast } from './ui';
+import { PILL_BTN, cn, toast } from './ui';
 import { LockMark, useEventPlan } from '../lib/eventPlan';
 
 // Fetches the championship's view-only share token and copies the public link
@@ -28,11 +29,11 @@ export function SharePublicLink({ eventId, className }: { eventId: string; class
     }
   };
   return (
-    <Button size="sm" variant="outline" disabled={busy || !shareOk} onClick={share} className={className}
+    // Same label while copying (a spinner replaces the icon), so the button never resizes.
+    <button type="button" disabled={busy || !shareOk} onClick={share} className={cn(PILL_BTN, className)} aria-busy={busy}
       title={shareOk ? 'Share a read-only link (Overview, Schedule, Results & Standings) with anyone.' : 'Public share links are not on this event’s plan'}>
-      {!shareOk && <LockMark capability="share_links" className="mr-1" />}
-
-      {busy ? 'Copying…' : '🔗 Copy public link'}
-    </Button>
+      {!shareOk ? <LockMark capability="share_links" /> : busy ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Link2 size={13} aria-hidden />}
+      <span>Copy <span className="max-[379px]:hidden">public </span>link</span>
+    </button>
   );
 }

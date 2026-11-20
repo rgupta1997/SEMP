@@ -4,14 +4,15 @@ import { Calculator, ChevronDown, Info, Minus, Plus, Scale, Trash2 } from 'lucid
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { ruleSummary, sportTitlesFor, titlesLine } from './StandingsRulesCard';
-import { Button, Input, Select, cn, toast } from './ui';
-import { TeamAvatar } from '../features/schedule/ScheduleParts';
+import { Button, Input, cn, toast } from './ui';
+import { PickList, type PickOption } from './PickList';
+import { TeamAvatar, categoryRank } from '../features/schedule/ScheduleParts';
 
 // Organiser-only cards under the championship table: manual adjustments (deductions,
 // forfeits, OC decisions) with a reason, and a plain summary of how the table is built.
 
 export interface AdjustableRow { entity_id: string; name: string; short_name?: string | null; organization_id: string; org_unit: { id: string } | null }
-interface DrawOption { id: string; disciplines?: { name: string } | null; tournament_sports?: { sports?: { name: string } | null } | null }
+interface DrawOption { id: string; disciplines?: { name: string } | null; tournament_sports?: { sports?: { name: string; icon?: string | null } | null } | null }
 interface Adjustment { id: string; entity_id: string; name: string; points: number; reason: string; discipline: string | null; created_by: string | null; created_at: string }
 
 const PANEL = 'overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
@@ -56,6 +57,16 @@ export function StandingsAdjustments({ eventId, rows, draws }: { eventId: string
   const draw = draws.find((d) => d.id === drawId);
   const drawName = (d: DrawOption) => [d.tournament_sports?.sports?.name, d.disciplines?.name].filter(Boolean).join(' · ');
 
+  const teamOptions: PickOption[] = rows.map((r) => ({ value: r.entity_id, label: r.name, icon: <TeamAvatar name={r.name} short={r.short_name} size="sm" /> }));
+  // Grouped by sport (A-Z), then Men's > Women's > Mixed inside each.
+  const drawOptions: PickOption[] = [
+    { value: '', label: 'Overall table only', hint: 'No discipline' },
+    ...draws
+      .map((d) => ({ d, sport: d.tournament_sports?.sports?.name ?? 'Other', name: d.disciplines?.name ?? 'Discipline' }))
+      .sort((a, b) => a.sport.localeCompare(b.sport) || categoryRank(a.name) - categoryRank(b.name) || a.name.localeCompare(b.name))
+      .map(({ d, sport, name }) => ({ value: d.id, label: name, group: sport, icon: <span className="text-base leading-none">{d.tournament_sports?.sports?.icon || '🏅'}</span> })),
+  ];
+
   const submit = () => {
     if (!row) return;
     add.mutate(
@@ -73,20 +84,14 @@ export function StandingsAdjustments({ eventId, rows, draws }: { eventId: string
 
       <div className="space-y-3 border-y border-slate-100 bg-slate-50/70 p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-800/30">
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="block min-w-0">
+          <div className="min-w-0">
             <Label>Team</Label>
-            <Select className="w-full" value={entity} onChange={(e) => setEntity(e.target.value)}>
-              <option value="">Choose a team</option>
-              {rows.map((r) => <option key={r.entity_id} value={r.entity_id}>{r.name}</option>)}
-            </Select>
-          </label>
-          <label className="block min-w-0">
+            <PickList value={entity} onChange={setEntity} options={teamOptions} placeholder="Choose a team" searchPlaceholder="Search teams" ariaLabel="Team" />
+          </div>
+          <div className="min-w-0">
             <Label>Applies to</Label>
-            <Select className="w-full" value={drawId} onChange={(e) => setDrawId(e.target.value)}>
-              <option value="">Overall table only</option>
-              {draws.map((d) => <option key={d.id} value={d.id}>{drawName(d)}</option>)}
-            </Select>
-          </label>
+            <PickList value={drawId} onChange={setDrawId} options={drawOptions} searchPlaceholder="Search sports or disciplines" ariaLabel="Applies to" />
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)]">

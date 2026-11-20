@@ -47,7 +47,7 @@ type View = 'points' | 'medals';
 type SportOption = { id: string; name: string; icon: string | null; live: number; total: number };
 
 // Podium step heights, by place.
-const STEP_H = ['h-24 sm:h-28', 'h-16 sm:h-20', 'h-11 sm:h-14'];
+const STEP_H = ['h-16 sm:h-20', 'h-12 sm:h-14', 'h-9 sm:h-10'];
 
 interface PodiumEntry { id: string; name: string; short: string | null; place: number; value: string }
 
@@ -59,8 +59,8 @@ function PodiumHero({ eyebrow, headline, sub, meta, podium, onPick }: {
   return (
     <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white shadow-sm">
       <SportsDecor />
-      <div className="relative flex flex-col gap-5 px-5 pt-5 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0 pb-1 md:pb-6">
+      <div className="relative flex flex-col gap-5 px-4 pt-5 sm:px-5 md:flex-row md:items-end md:justify-between">
+        <div className={cn('min-w-0 md:pb-6', order.length === 0 && 'pb-5')}>
           <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">{eyebrow}</div>
           <h2 className="mt-1 truncate text-2xl font-black sm:text-3xl">{headline}</h2>
           <p className="mt-1 text-sm font-semibold text-white/85">{sub}</p>
@@ -73,14 +73,14 @@ function PodiumHero({ eyebrow, headline, sub, meta, podium, onPick }: {
               return (
                 <button key={p.id} type="button" onClick={() => onPick(p.id)} title={`${p.name}: see how these were earned`}
                   className="group flex w-1/3 min-w-0 flex-col items-center focus:outline-none">
-                  <span className="relative mb-1.5 transition group-hover:-translate-y-0.5">
-                    {p.place === 1 && <Trophy size={18} className="absolute -top-5 left-1/2 -translate-x-1/2 text-amber-300" aria-hidden />}
-                    <span className="block scale-[1.2] rounded-full ring-2 ring-brand-700"><TeamAvatar name={p.name} short={p.short} /></span>
+                  <span className="mt-1 scale-110 rounded-full ring-2 ring-brand-700 transition group-hover:-translate-y-0.5"><TeamAvatar name={p.name} short={p.short} /></span>
+                  <span className="mt-1.5 w-full truncate text-center text-[15px] font-black" title={p.name}>{p.short || p.name}</span>
+                  <span className="mb-2 w-full truncate text-center text-xs text-white/70">{p.value}</span>
+                  {/* The trophy rides inside the winner's step: no extra height, never clipped. */}
+                  <span className={cn('flex w-full items-center justify-center gap-1 rounded-t-xl border-t-4 bg-white/15 text-2xl font-black ring-1 ring-inset ring-white/15 transition group-hover:bg-white/20 group-focus-visible:ring-2 group-focus-visible:ring-white/60', STEP_H[p.place - 1] ?? STEP_H[2])}
+                    style={{ borderTopColor: medal.bg }}>
+                    {p.place === 1 && <Trophy size={18} className="text-amber-300" aria-hidden />}{p.place}
                   </span>
-                  <span className="mt-1 w-full truncate text-center text-sm font-black" title={p.name}>{p.short || p.name}</span>
-                  <span className="mb-2 w-full truncate text-center text-[11px] text-white/70">{p.value}</span>
-                  <span className={cn('grid w-full place-items-center rounded-t-xl border-t-4 bg-white/15 text-2xl font-black ring-1 ring-inset ring-white/15 transition group-hover:bg-white/20 group-focus-visible:ring-2 group-focus-visible:ring-white/60', STEP_H[p.place - 1] ?? STEP_H[2])}
-                    style={{ borderTopColor: medal.bg }}>{p.place}</span>
                 </button>
               );
             })}
@@ -197,7 +197,8 @@ const muted = 'text-slate-500 dark:text-slate-400';
 const won = 'font-semibold text-emerald-600 dark:text-emerald-400';
 const lost = 'text-rose-500 dark:text-rose-400';
 const MEDAL_KEYS = ['gold', 'silver', 'bronze'] as const;
-const pip = (k: string) => <span className={`medal-pip medal-pip--${k} inline-block align-middle`} aria-label={k} />;
+const MEDAL_EMOJI: Record<string, string> = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+const pip = (k: string) => <span role="img" aria-label={k} className="text-base leading-none">{MEDAL_EMOJI[k]}</span>;
 
 export function StandingsPage() {
   const { eventId, championship, canManage } = useEvent();
@@ -302,7 +303,7 @@ export function StandingsPage() {
         line: (
           <span className={cn('flex items-center gap-2 text-[11px] font-semibold tabular-nums', muted)}>
             <span>P{r.played}</span><span className={won}>W{r.won}</span><span>D{r.drawn}</span><span className={lost}>L{r.lost}</span>
-            {i > 0 && <span className="text-slate-400">Â· -{formatPoints(top - r.points)}</span>}
+            {i > 0 && <span className="text-slate-400">· -{formatPoints(top - r.points)}</span>}
           </span>
         ),
       })),
@@ -324,15 +325,16 @@ export function StandingsPage() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_16rem]">
         <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-            <div className="flex items-center gap-3">
+          <header className="flex flex-wrap items-center gap-x-3 gap-y-2.5 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <span className="text-sm font-black text-slate-800 dark:text-slate-100">Leaderboard</span>
               {rows.length > 0 && (
                 <ViewTabs size="sm" value={view} onChange={(v) => { setView(v); setExpanded(null); }}
                   options={[{ value: 'points', label: 'Points', icon: ListOrdered }, { value: 'medals', label: 'Medals', icon: Medal }]} />
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Phone: its own full-width row, time on the left and both buttons on the right, so nothing wraps or shifts. */}
+            <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
               <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
               <SharePublicLink eventId={eventId} />
             </div>

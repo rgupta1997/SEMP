@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, FileSpreadsheet, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Award, Mail, Medal, Menu, MessageSquare, Moon, Plus, Send, Sun, Trophy, Upload, User, Users, X, CreditCard, Tags,
+  Award, Mail, Medal, MessageSquare, Moon, Plus, Send, Sun, Trophy, Upload, User, Users, X, CreditCard, Tags,
   Zap,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -13,19 +13,18 @@ import { useWorkspace } from '../lib/useWorkspace';
 import { applyTenantTheme, DEFAULT_BRAND } from '../lib/tenant-theme';
 import { navIcon } from '../lib/nav-icons';
 import { hrefFor, resolveNav } from '../lib/workspace';
-import { BottomNav } from './BottomNav';
-import { Lock as LockIcon, PanelLeftClose, PanelLeftOpen, SlidersHorizontal } from 'lucide-react';
+import { BottomNav, CELL as NAV_CELL } from './BottomNav';
+import { Bell, ChevronRight, Lock as LockIcon, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { parseEventId } from '../lib/championship-nav';
 import { FeedbackWidget } from './FeedbackWidget';
 import { Sheet } from './primitives';
 import { useFilterBar, FilterProvider } from '../lib/filters';
-import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { sidebarRailed } from '../lib/browserStorage';
-import { useShellTitle } from '../lib/pageTitle';
 import { Avatar, Button, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
+import { notificationHooks } from '../lib/notification';
 
 interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
@@ -118,23 +117,11 @@ const SHOW_MY_PLAN = false;
 /** An icon button in the sidebar footer, coloured from the sidebar's own tokens. */
 const SIDEBAR_ICON = 'text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]';
 
-function HeaderFilters({ inline = false }: {
-  /** Desktop: a plain row at the top of the page, now there is no top bar to hold it. */
-  inline?: boolean;
-} = {}) {
+/** The page's filters as a plain row above its content (there is no top bar to hold them). */
+function HeaderFilters() {
   const { eventId, setEventId, tournamentId, setTournamentId, sportId, setSportId, config } = useFilterBar();
-  const [open, setOpen] = useState(false);
   if (!config.championships && !config.tournaments && !config.sports) return null;
 
-  const active = [eventId, tournamentId, sportId].filter(Boolean).length;
-
-  // BEHIND A BUTTON ON A PHONE.
-  //
-  // This was `order-last w-full` below sm - a full-width row of up to three 152px
-  // selects wedged under the header, which on a 390px screen either wrapped to two
-  // more rows or squeezed the title and the avatar into nothing. The controls
-  // themselves are unchanged; below sm they move into a sheet behind one button
-  // that says how many are set.
   const controls = (
     <>
       {config.championships && (
@@ -158,33 +145,21 @@ function HeaderFilters({ inline = false }: {
     </>
   );
 
-  if (inline) return <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{controls}</div>;
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={active ? `Filters, ${active} active` : 'Filters'}
-        className="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 sm:hidden dark:text-slate-300 dark:hover:bg-slate-800"
-      >
-        <SlidersHorizontal size={18} />
-        {active > 0 && (
-          <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white">{active}</span>
-        )}
-      </button>
-      <div className="hidden items-center gap-2 sm:flex">{controls}</div>
-      {open && (
-        <Sheet title="Filter this view" size="sm" onClose={() => setOpen(false)}
-          footer={<Button className="w-full" onClick={() => setOpen(false)}>Show results</Button>}>
-          <div className="flex flex-col gap-3 [&_select]:w-full [&_select]:min-w-0">{controls}</div>
-        </Sheet>
-      )}
-    </>
-  );
+  return <div className="mb-4 flex flex-wrap items-center justify-end gap-2 max-sm:[&_select]:min-w-0 max-sm:[&_select]:flex-1">{controls}</div>;
 }
 
-interface EventSummary { id: string; name: string }
+/** A row in the phone account sheet. */
+function AccountRow({ icon, label, onClick, right, danger = false }: { icon: ReactNode; label: string; onClick: () => void; right?: ReactNode; danger?: boolean }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn('flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition',
+        danger ? 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800')}>
+      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg', danger ? 'bg-rose-50 dark:bg-rose-500/15' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>{icon}</span>
+      <span className="flex-1">{label}</span>
+      {right}
+    </button>
+  );
+}
 
 export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
@@ -192,7 +167,11 @@ export function AppShell() {
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
+  // Phone: the account sheet (bottom bar) and the notifications drawer it opens.
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const { data: unreadCount } = notificationHooks.useUnreadCount();
+  const unread = unreadCount ?? 0;
   // The sidebar's account menu (desktop); the phone bar keeps its own.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -200,7 +179,6 @@ export function AppShell() {
   // one - collapsing it on Fixtures and finding it expanded again on Standings
   // would read as the app forgetting.
   const [railed, setRailed] = useState(sidebarRailed.get);
-  const pageTitle = useShellTitle();
   const toggleRail = () => setRailed((v) => {
     const next = !v;
     sidebarRailed.set(next);
@@ -254,7 +232,6 @@ export function AppShell() {
   prevWorkspaceIdRef.current = workspaceId;
 
   const eventId = ctx ? parseEventId(pathname) : null;
-  const { data: championship } = useApi<EventSummary>(eventId ? `/championships/${eventId}` : null);
 
   if (!ctx) return null;
 
@@ -263,7 +240,6 @@ export function AppShell() {
   const isPlatform = activeRole === 'system';
   const groups = isPlatform ? navFor(activeRole) : [];
   const contextNav = !isPlatform && ws.active ? resolveNav(ws.active, ws.granted, ws.navFacts) : [];
-  const subtitle = championship?.name ?? (isPlatform ? ROLE_LABELS[activeRole] : ws.active?.name ?? '');
 
   /**
    * THE SCORING CONSOLE OWNS A PHONE'S SCREEN.
@@ -337,8 +313,9 @@ export function AppShell() {
               />
             </div>
           )}
-          {/* Collapsed: no visible scrollbar (it still scrolls), or its width pushes the icons off the logo's centre line. */}
-          <nav className={cn('flex-1 overflow-y-auto px-3 py-4', railed && 'md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden')}>
+          {/* Collapsed: no visible scrollbar (it still scrolls), or its width pushes the icons off the logo's centre line.
+              .no-scrollbar, not a Tailwind class: index.css styles scrollbars unlayered, which beats any utility. */}
+          <nav className={cn('flex-1 overflow-y-auto px-3 py-4', railed && 'no-scrollbar')}>
             {!isPlatform && ws.active && contextNav.map((it) => {
               const href = hrefFor(ws.active!, it);
               const Icon = navIcon(it.key);
@@ -455,87 +432,67 @@ export function AppShell() {
         {/* Main - pinned to the viewport height so only <main> scrolls; the sidebar
             stays put (md:h-auto would let the column grow and drag the whole grid). */}
         <div className="flex h-screen h-dvh min-h-0 min-w-0 flex-col">
-          {/* ONE ROW ON A PHONE.
-              This was `flex-wrap` carrying four groups - hamburger + subtitle, the
-              filter selects, the role switcher, and bell/theme/avatar - which on a
-              390px screen stacked into three rows and spent ~150px of the fold
-              before any content appeared. Now it is hamburger, title, bell, avatar.
-              The theme toggle and the role switcher move into the avatar menu,
-              where a control used once a month belongs, and the filters move into a
-              sheet behind a single button. */}
-          {/* Phone only (it carries the hamburger), and not while scoring: the console owns a phone's screen. */}
-          <header className={cn('flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 md:hidden dark:border-slate-800 dark:bg-slate-900', scoring && 'max-md:hidden')}>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              <button onClick={() => setSidebarOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={20} /></button>
-              {/* A page's own title when it set one (usePageTitle), else the workspace name. */}
-              {pageTitle ? (
-                <h1 className="truncate font-display text-lg font-extrabold tracking-tight text-slate-900 sm:text-xl dark:text-slate-100" title={subtitle ?? undefined}>{pageTitle}</h1>
-              ) : (
-                <div className="truncate text-sm font-semibold text-slate-700 sm:font-medium sm:text-slate-600 dark:text-slate-300">{subtitle}</div>
-              )}
-            </div>
-            <HeaderFilters />
-            <div className="flex shrink-0 items-center gap-1 sm:gap-3">
-              <div className="hidden sm:block"><RoleSwitcher /></div>
-              <NotificationBell />
-              <button
-                onClick={toggle}
-                className="hidden h-9 w-9 place-items-center rounded-lg text-slate-500 transition-[background-color,transform] duration-150 hover:bg-slate-100 hover:scale-[1.08] active:scale-90 sm:grid dark:text-slate-400 dark:hover:bg-slate-800"
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              >{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
-              <div className="relative">
-                <button onClick={() => setMenuOpen((o) => !o)} aria-label="Account menu" className="flex h-10 items-center gap-2 rounded-lg px-1.5 py-1 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-[0.97] dark:hover:bg-slate-800">
-                  <Avatar name={ctx.user.name} size={30} />
-                  <span className="hidden text-sm font-medium text-slate-700 sm:inline dark:text-slate-300">{ctx.user.name}</span>
-                </button>
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-scrim" onClick={() => setMenuOpen(false)} />
-                    <div className="animate-dropdown absolute right-0 z-popover mt-2 w-56 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-                      <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
-                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
-                        <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
-                        {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
-                      </div>
-                      {/* My plan (PG-07). The PERSONAL ladder - an institution's
-                          plan lives on its own Billing & Subscription tab, where the
-                          people who can buy it are. Two independent ladders, and a
-                          single menu item reaching both would imply otherwise. */}
-                      {SHOW_MY_PLAN && (
-                        <button
-                          onClick={() => { setMenuOpen(false); navigate('/plans'); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >My plan</button>
-                      )}
-                      {/* The two controls the header gives up below sm. They live
-                          here at every width so there is ONE place to look for
-                          them, rather than a control that migrates at 640px. */}
-                      <button
-                        onClick={toggle}
-                        className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 sm:hidden dark:text-slate-200 dark:hover:bg-slate-800"
-                      >
-                        <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-                        {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-                      </button>
-                      <div className="px-4 py-2 empty:hidden sm:hidden"><RoleSwitcher /></div>
-                      <button onClick={signOut} className="w-full px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
-                    </div>
-                  </>
+          {/* Phone: a thin brand bar, so the screen never opens on a bare edge. The
+              controls it used to carry live in the bottom bar's Account sheet. */}
+          {!scoring && (
+            <div className="pt-safe shrink-0 border-b border-slate-200 bg-white md:hidden dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex h-11 items-center gap-3 px-4">
+                <BrandMark height={18} />
+                {ws.active?.name && (
+                  <span className="ml-auto min-w-0 truncate text-xs font-semibold text-slate-500 dark:text-slate-400" title={ws.active.name}>{ws.active.name}</span>
                 )}
               </div>
             </div>
-          </header>
+          )}
           {/* pb-24 below md clears the tab bar; the bar carries its own
               safe-area padding for the home indicator beneath it. */}
           <main className={cn('min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 pb-24 sm:p-6 md:pb-6 dark:bg-slate-950', scoring && 'max-md:p-2 max-md:pb-2')}>
             <div key={pathname} className={cn('mx-auto', isWorkspaceSwitch ? 'animate-workspace-enter' : 'animate-page-enter', !eventId && 'max-w-6xl')}>
-              <div className="hidden md:block"><HeaderFilters inline /></div>
+              <HeaderFilters />
               <Outlet />
             </div>
           </main>
           {/* md:hidden is BottomNav's own; on /score it is also gone on a phone. */}
-          {!scoring && <BottomNav items={contextNav} groups={groups} ctx={ws.active} onMore={() => setSidebarOpen(true)} />}
+          {!scoring && (
+            <BottomNav items={contextNav} groups={groups} ctx={ws.active} onMore={() => setSidebarOpen(true)}
+              trailing={(
+                <button type="button" onClick={() => setAccountOpen(true)} className={cn(NAV_CELL, 'text-slate-500 dark:text-slate-400')}
+                  aria-label={unread > 0 ? `Account, ${unread} unread notifications` : 'Account'}>
+                  <span className="relative">
+                    <Avatar name={ctx.user.name} size={22} />
+                    {/* The bell's unread badge, since the bell itself is not on a phone's screen. */}
+                    {unread > 0 && (
+                      <span className="absolute -right-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-rose-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-white dark:ring-slate-900" aria-hidden>
+                        {unread > 99 ? '99+' : unread}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px] font-semibold leading-none">Account</span>
+                </button>
+              )} />
+          )}
+          {accountOpen && (
+            <Sheet title="Account" size="sm" onClose={() => setAccountOpen(false)}>
+              <div className="space-y-1">
+                <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+                  <Avatar name={ctx.user.name} size={40} />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{ctx.user.name}</div>
+                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
+                    {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
+                  </div>
+                </div>
+                <AccountRow icon={<Bell size={17} />} label="Notifications" onClick={() => { setAccountOpen(false); setBellOpen(true); }}
+                  right={unread > 0 ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">{unread > 99 ? '99+' : unread}</span> : <ChevronRight size={16} className="text-slate-400" />} />
+                <AccountRow icon={theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />} label={theme === 'dark' ? 'Light mode' : 'Dark mode'} onClick={toggle} />
+                {SHOW_MY_PLAN && <AccountRow icon={<CreditCard size={17} />} label="My plan" onClick={() => { setAccountOpen(false); navigate('/plans'); }} />}
+                <div className="px-3 py-2 empty:hidden"><RoleSwitcher /></div>
+                <AccountRow icon={<LogOut size={17} />} label="Sign out" danger onClick={signOut} />
+              </div>
+            </Sheet>
+          )}
+          {/* The drawer only; the account sheet above opens it. */}
+          <NotificationBell hideTrigger open={bellOpen} onOpenChange={setBellOpen} />
         </div>
         {/* A thin top-loading-bar sweep on a real switch - never on first load
             (washGenRef starts at 0 and only moves on an actual prev-id -> new-id

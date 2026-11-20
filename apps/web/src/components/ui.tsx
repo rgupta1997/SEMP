@@ -5,7 +5,7 @@ import type {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, SlidersHorizontal, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
 import { useDialog } from '../lib/useDialog';
 import { usePageTitle } from '../lib/pageTitle';
@@ -321,6 +321,9 @@ export function StatusBadge({ status, label, className }: { status?: string | nu
 // "Updated HH:MM:SS · ↻ Refresh now" control for auto-refreshing tables (e.g.
 // standings). The caller owns the data + interval; this just renders the timestamp
 // and a manual refresh button.
+/** The rounded pill look of the redesigned pages' secondary actions. */
+export const PILL_BTN = 'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-brand-300 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:border-slate-200 disabled:hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-brand-500/50 dark:hover:text-brand-300';
+
 export function RefreshBar({ updatedAt, isFetching, onRefresh, cooldownMs = 10000, className = '' }: { updatedAt?: number; isFetching?: boolean; onRefresh: () => void; cooldownMs?: number; className?: string }) {
   const label = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
   // After a manual refresh, lock the button for `cooldownMs` (tick down the remaining
@@ -337,11 +340,16 @@ export function RefreshBar({ updatedAt, isFetching, onRefresh, cooldownMs = 1000
     setCooldown(Math.ceil(cooldownMs / 1000));
   };
   return (
-    <div className={cn('flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500', className)}>
-      <span>Updated {label}</span>
-      <Button size="sm" variant="ghost" disabled={isFetching || cooldown > 0} onClick={handleRefresh}>
-        {isFetching ? 'Refreshing…' : cooldown > 0 ? `↻ Wait ${cooldown}s` : '↻ Refresh now'}
-      </Button>
+    <div className={cn('flex min-w-0 items-center gap-2 text-xs text-slate-400 dark:text-slate-500', className)}>
+      <span className="truncate tabular-nums">Updated {label}</span>
+      {/* One label throughout, so the button never changes width: the icon spins while
+          loading, and the wait shows as disabled with a tooltip. Auto-refresh flips
+          isFetching every few seconds, and a changing label made the row jump. */}
+      <button type="button" disabled={isFetching || cooldown > 0} onClick={handleRefresh} className={PILL_BTN}
+        title={isFetching ? 'Refreshing…' : cooldown > 0 ? `Refreshed. Next manual refresh in ${cooldown}s` : 'Refresh now'} aria-label="Refresh now">
+        <RefreshCw size={13} className={cn(isFetching && 'animate-spin')} aria-hidden />
+        <span className="max-[379px]:sr-only">Refresh</span>
+      </button>
     </div>
   );
 }
