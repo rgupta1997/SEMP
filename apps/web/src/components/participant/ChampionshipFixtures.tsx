@@ -116,6 +116,8 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
   }, [all]);
   const bracketTeamName = (id: string | null) => (id ? teamLabel(teamsById.get(id) ?? null) : TBD_LABEL);
   const bracketTeamOrg = (id: string | null) => (id ? orgLabel(teamsById.get(id) ?? null) : '');
+  // The badge text: the squad's code, else its institute's, as on Schedule.
+  const bracketTeamShort = (id: string | null) => { const tm = id ? teamsById.get(id) : null; return tm?.short_name || tm?.organizations?.short_name || null; };
 
   // Schedule shows every fixture (the championship calendar); Results only those
   // that have concluded.
@@ -247,7 +249,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
           ) : showBracket ? (
             <Card className="p-3 sm:p-4">
               {/* Read-only: no onSelect / onScore, so nothing in it can be edited. */}
-              <Bracket fixtures={knockout} teamName={bracketTeamName} teamOrg={bracketTeamOrg} />
+              <Bracket fixtures={knockout} sportName={g.sport} teamName={bracketTeamName} teamShort={bracketTeamShort} teamOrg={bracketTeamOrg} />
             </Card>
           ) : g.rows.map((f) => {
             const scored = f.home_score != null && f.away_score != null;

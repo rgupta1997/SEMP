@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, FileSpreadsheet, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
@@ -114,7 +115,13 @@ const HEADER_SELECT = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5
 // PlanPage are untouched. Flip back to true once personal plans are for sale.
 const SHOW_MY_PLAN = false;
 
-function HeaderFilters() {
+/** An icon button in the sidebar footer, coloured from the sidebar's own tokens. */
+const SIDEBAR_ICON = 'text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]';
+
+function HeaderFilters({ inline = false }: {
+  /** Desktop: a plain row at the top of the page, now there is no top bar to hold it. */
+  inline?: boolean;
+} = {}) {
   const { eventId, setEventId, tournamentId, setTournamentId, sportId, setSportId, config } = useFilterBar();
   const [open, setOpen] = useState(false);
   if (!config.championships && !config.tournaments && !config.sports) return null;
@@ -151,6 +158,8 @@ function HeaderFilters() {
     </>
   );
 
+  if (inline) return <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{controls}</div>;
+
   return (
     <>
       <button
@@ -184,6 +193,8 @@ export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The sidebar's account menu (desktop); the phone bar keeps its own.
+  const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Desktop rail. Persisted because it is a workspace preference, not a per-page
   // one - collapsing it on Fixtures and finding it expanded again on Standings
@@ -301,9 +312,13 @@ export function AppShell() {
             sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
-          <div className={cn('flex items-center gap-2.5 border-b py-3.5', railed ? 'md:justify-center md:px-0 px-4' : 'px-4')} style={{ borderColor: 'var(--sidebar-border)' }}>
+          <div className={cn('flex items-center gap-2.5 border-b py-3.5', railed ? 'md:flex-col md:justify-center md:gap-2 md:px-0 px-4' : 'px-4')} style={{ borderColor: 'var(--sidebar-border)' }}>
             <BrandMark height={22} className={cn(railed && 'md:hidden')} />
             {railed && <span className="hidden md:block"><BrandMark height={22} markOnly /></span>}
+            <button onClick={toggleRail} className={cn('hidden h-8 w-8 place-items-center rounded-lg md:grid', SIDEBAR_ICON, !railed && 'ml-auto')}
+              aria-label={railed ? 'Expand sidebar' : 'Collapse sidebar'} aria-pressed={railed} title={railed ? 'Expand sidebar' : 'Collapse sidebar'}>
+              {railed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
             <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-[var(--sidebar-muted)] transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)] active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
           {/* Keyed to the workspace, not the route: re-entering on every click
@@ -378,7 +393,62 @@ export function AppShell() {
             ))}
           </nav>
           </div>
+          {/* Desktop: the account, notifications and theme in one compact row (a phone
+              keeps them in its slim top bar). Collapsed, they stack. */}
+          <div className="hidden border-t p-2 md:block" style={{ borderColor: 'var(--sidebar-border)' }}>
+            {railed ? (
+              <div className="flex flex-col items-center gap-1">
+                <NotificationBell className={SIDEBAR_ICON} />
+                <button onClick={toggle} className={cn('grid h-9 w-9 place-items-center rounded-lg', SIDEBAR_ICON)}
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                </button>
+                <button onClick={() => setDeskMenuOpen((o) => !o)} aria-label="Account menu" aria-expanded={deskMenuOpen}
+                  className="mt-1 rounded-full ring-2 ring-transparent transition hover:ring-[var(--sidebar-active)]" title={ctx.user.name}>
+                  <Avatar name={ctx.user.name} size={30} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-0.5 rounded-xl bg-[var(--sidebar-active)]/60 p-1">
+                <button onClick={() => setDeskMenuOpen((o) => !o)} aria-label="Account menu" aria-expanded={deskMenuOpen}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-[var(--sidebar-active)]">
+                  <Avatar name={ctx.user.name} size={28} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold leading-tight text-[var(--sidebar-fg-strong)]">{ctx.user.name}</span>
+                    <span className="block truncate text-[10.5px] leading-tight text-[var(--sidebar-muted)]">{ctx.user.email}</span>
+                  </span>
+                </button>
+                <NotificationBell className={cn('!h-8 !w-8', SIDEBAR_ICON)} />
+                <button onClick={toggle} className={cn('grid h-8 w-8 flex-none place-items-center rounded-lg', SIDEBAR_ICON)}
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+                  {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+                </button>
+              </div>
+            )}
+          </div>
         </aside>
+
+        {/* The sidebar account menu opens beside the sidebar. Portalled: the sidebar clips its children. */}
+        {deskMenuOpen && createPortal(
+          <>
+            <div className="fixed inset-0 z-scrim" onClick={() => setDeskMenuOpen(false)} />
+            <div className="animate-dropdown fixed bottom-3 z-popover w-64 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900"
+              style={{ left: railed ? 80 : 248 }}>
+              <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
+                <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
+                {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
+              </div>
+              {SHOW_MY_PLAN && (
+                <button onClick={() => { setDeskMenuOpen(false); navigate('/plans'); }}
+                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">My plan</button>
+              )}
+              <div className="px-4 py-2"><RoleSwitcher /></div>
+              <button onClick={signOut} className="w-full px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
+            </div>
+          </>,
+          document.body,
+        )}
 
         {/* Main - pinned to the viewport height so only <main> scrolls; the sidebar
             stays put (md:h-auto would let the column grow and drag the whole grid). */}
@@ -391,18 +461,10 @@ export function AppShell() {
               The theme toggle and the role switcher move into the avatar menu,
               where a control used once a month belongs, and the filters move into a
               sheet behind a single button. */}
-          <header className={cn('flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 dark:border-slate-800 dark:bg-slate-900', scoring && 'max-md:hidden')}>
+          {/* Phone only (it carries the hamburger), and not while scoring: the console owns a phone's screen. */}
+          <header className={cn('flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 md:hidden dark:border-slate-800 dark:bg-slate-900', scoring && 'max-md:hidden')}>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <button onClick={() => setSidebarOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={20} /></button>
-              {/* Rail toggle. Desktop only - on a phone the sidebar is a drawer and
-                  there is no rail to collapse to. */}
-              <button
-                onClick={toggleRail}
-                className="hidden h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:grid dark:text-slate-400 dark:hover:bg-slate-800"
-                aria-label={railed ? 'Expand sidebar' : 'Collapse sidebar'}
-                aria-pressed={railed}
-                title={railed ? 'Expand sidebar' : 'Collapse sidebar'}
-              >{railed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
               {/* A page's own title when it set one (usePageTitle), else the workspace name. */}
               {pageTitle ? (
                 <h1 className="truncate font-display text-lg font-extrabold tracking-tight text-slate-900 sm:text-xl dark:text-slate-100" title={subtitle ?? undefined}>{pageTitle}</h1>
@@ -466,6 +528,7 @@ export function AppShell() {
               safe-area padding for the home indicator beneath it. */}
           <main className={cn('min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 pb-24 sm:p-6 md:pb-6 dark:bg-slate-950', scoring && 'max-md:p-2 max-md:pb-2')}>
             <div key={pathname} className={cn('mx-auto', isWorkspaceSwitch ? 'animate-workspace-enter' : 'animate-page-enter', !eventId && 'max-w-6xl')}>
+              <div className="hidden md:block"><HeaderFilters inline /></div>
               <Outlet />
             </div>
           </main>

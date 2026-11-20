@@ -3112,7 +3112,11 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           Next board → {state.rubbers[nextPlayable].label}
                         </Button>
                       )}
-                      {active.winner && mode === 'detailed' && rdef.archetype !== 'time' && (
+                      {/* Chess boards are pick-only, so the re-score reopen below never shows: a mis-tap needs its own way back. */}
+                      {spec.boardPoints && (active.winner || active.drawn) && (
+                        <Button variant="ghost" className="w-full" onClick={() => reopen(state.activeRubber)}>↺ Clear this board</Button>
+                      )}
+                      {active.winner && mode === 'detailed' && rdef.archetype !== 'time' && !spec.boardPoints && (
                         <Button variant="ghost" className="w-full" onClick={() => reopen(state.activeRubber, true)}>↺ Reopen &amp; clear to re-score</Button>
                       )}
                     </>

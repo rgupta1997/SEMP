@@ -142,7 +142,11 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
   const stages = [...new Set(tableAll.map((f) => f.stage_sequence ?? 1))].sort((a, b) => a - b).map((stage) => {
     const ranking = ctx.rankingFor!(stage);
     const stageAll = tableAll.filter((f) => (f.stage_sequence ?? 1) === stage);
-    const pools = [...new Set(stageAll.map((f) => f.pool_number ?? null))].sort((a, b) => (a ?? 0) - (b ?? 0)).map((pool): PoolTable => {
+    // A stage with real pools skips pool-less matches (e.g. a hand-added "Eliminator"): they'd
+    // form an empty, unnamed "Table". A plain league, with no pools at all, keeps its one table.
+    const poolKeys = [...new Set(stageAll.map((f) => f.pool_number ?? null))];
+    const hasPools = poolKeys.some((p) => p != null);
+    const pools = poolKeys.filter((p) => !hasPools || p != null).sort((a, b) => (a ?? 0) - (b ?? 0)).map((pool): PoolTable => {
       const poolAll = stageAll.filter((f) => (f.pool_number ?? null) === pool);
       const complete = poolAll.length > 0 && poolAll.every((f) => SETTLED.has(f.status));
       const g = rankGroup(fixtures.filter((f) => !isKnockoutRound(f.round) && (f.stage_sequence ?? 1) === stage && (f.pool_number ?? null) === pool), ranking, resolverFor(resolutions, 'pool', stage, pool));

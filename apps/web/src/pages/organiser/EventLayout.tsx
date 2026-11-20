@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
+import { PageSkeleton } from '../../features/schedule/ScheduleParts';
 import { api } from '../../lib/api';
 import { archiveDaysLeft, archivePurgeDate, citiesShort } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
@@ -100,7 +101,12 @@ export function EventLayout() {
       />
     );
   }
-  if (isLoading || !championship) return <Spinner />;
+  if (isLoading || !championship) {
+    // Schedule and Results show their own layout shimmering rather than a lone spinner.
+    const seg = parseEventSegment(pathname, eventId!);
+    if (seg === 'schedule' || seg === 'results') return <PageSkeleton kind={seg} />;
+    return <Spinner />;
+  }
 
   // A section reachable by URL that the sidebar does not offer is an access bug
   // waiting to happen, so both are answered from the same list. The server still
@@ -115,6 +121,10 @@ export function EventLayout() {
   if (segment && !canManage && !mayOpenSegment(roleCodes, segment)) {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
+
+  // Schedule and Results open straight on their content: back, status and the
+  // lifecycle button stay on the other event pages.
+  const bareHeader = segment === 'schedule' || segment === 'results';
 
   // An archived event is read-only; no lifecycle step is offered until it is retrieved.
   const archivedAt = championship.archived_at ?? null;
@@ -176,7 +186,7 @@ export function EventLayout() {
           </Button>
         )}
       </div>
-      ) : (
+      ) : bareHeader ? null : (
       // Every other page: the NAME is in the top bar (usePageTitle), and what stays is
       // one line - back, status, where and when, and the lifecycle action.
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">

@@ -1,22 +1,23 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  Check, CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, MapPin, Pencil, Radio, ShieldCheck, Users,
+  ChevronRight, Clock, Eye, Flag, Lock, LockOpen, Pencil, Radio, ShieldCheck,
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, isKnockoutRound, isRankingSport, KHO_END_LABEL, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
-import { titleCase, whenLabel } from '../../lib/format';
 import {
-  Badge, Button, Card, EmptyState, FilterChips, Modal, Segmented, Select, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
+  Button, Card, EmptyState, Modal, Segmented, Select, Spinner, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
 import { GroupTables, TallyTabLabel } from '../../components/GroupTables';
 import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../../components/TitleTally';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
+import { BackToTop } from '../../components/BackToTop';
+import { BannerSkeleton, LiveStrip, MatchCard, SportSectionSkeleton, ProgressRing, sortByCategory, ViewTabs, PulseBanner, SportChips, TeamChips, type CardSide, type PulseTile, type TeamSide } from '../../features/schedule/ScheduleParts';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
@@ -52,9 +53,6 @@ interface ResultRow {
   ground?: { id: string; name: string; venue: string | null } | null;
 }
 
-/** A side's name in the desktop row: up to two lines, then "…". */
-const DESKTOP_NAME = 'line-clamp-2 min-w-0 break-words text-sm font-medium leading-snug text-slate-700 dark:text-slate-200';
-
 /** "Turfup · Turf 1" - venue then ground, whichever are set. */
 const venueLabel = (g: ResultRow['ground']) => (g ? [g.venue, g.name].filter(Boolean).join(' · ') : '');
 
@@ -83,7 +81,7 @@ const teamCode = (t: Side | null) => {
   const code = (t?.org_units?.code ?? '').replace(/[^a-zA-Z0-9]/g, '');
   if (code) return code.slice(0, 4).toUpperCase();
   return (t?.org_units?.name || t?.organizations?.short_name || t?.name || '')
-    .replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || '··';
+    .replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || '··';
 };
 
 const teamLabel = (t: Side | null) =>
@@ -162,41 +160,6 @@ function IconAction({
 }
 
 /**
- * Status as a glyph plus one word, rather than a full badge.
- *
- * A StatusBadge is the right density beside a match on a desktop table. On a phone
- * it competed with the score for the same line, so this is the same information at a
- * third of the width - and colour is never the only signal, because the glyph
- * differs too.
- */
-function StatusGlyph({ locked, rankingEvent, status }: { locked: boolean; rankingEvent: boolean; status: string }) {
-  const done = status === 'completed' || status === 'confirmed';
-  const [Icon, text, cls] = locked
-    ? [ShieldCheck, 'Official', 'text-emerald-600 dark:text-emerald-400']
-    : rankingEvent
-      ? [Users, 'Individual', 'text-slate-500 dark:text-slate-400']
-      : done
-        ? [CheckCircle2, 'Played', 'text-emerald-600 dark:text-emerald-400']
-        // 'live' is the value the database actually stores - FIXTURE_STATUS is
-        // scheduled | live | completed | postponed | cancelled | bye | walkover.
-        // This read 'in_progress', which is not one of them, so every match in play
-        // fell through to the grey "Scheduled" clock.
-        : status === 'live'
-          ? [Radio, 'Live', 'text-[var(--live)]']
-          : status === 'walkover' || status === 'bye'
-            ? [CheckCircle2, titleCase(status), 'text-slate-500 dark:text-slate-400']
-            : [Clock, titleCase(status || 'Scheduled'), 'text-slate-400 dark:text-slate-500'];
-  return (
-    <span className={cn('inline-flex shrink-0 items-center gap-1 text-[11px] font-bold uppercase tracking-wide', cls)}
-      title={text}
-    >
-      <Icon size={14} />
-      <span className="hidden sm:inline">{text}</span>
-    </span>
-  );
-}
-
-/**
  * The statuses this page is about: being played, or played.
  *
  * `scheduled` is Schedule's business, and `postponed` / `cancelled` will never
@@ -214,35 +177,6 @@ const PHONE_FILL = 'min-w-0 max-sm:[&>div]:w-full max-sm:[&_select]:w-full';
 
 const teamShort = (t: Side | null) =>
   t?.short_name || t?.org_units?.code || t?.organizations?.short_name || teamLabel(t);
-
-// The dark square chip used for each side of a match (e.g. "INF", "WIP"). When the
-// side isn't decided yet (knockout placeholder / bye), show a clear "TBD" chip so
-// the match still reads as a listed fixture instead of an empty row.
-function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean }) {
-  if (!team) {
-    return (
-      <span
-        className="grid h-9 min-w-9 shrink-0 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 dark:text-slate-500"
-        title="To be decided"
-      >
-        TBD
-      </span>
-    );
-  }
-  return (
-    <span
-      className={cn(
-        'grid h-9 w-9 shrink-0 place-items-center rounded-lg font-bold tracking-tight',
-        // Four characters need the smaller size to stay inside the square.
-        teamCode(team).length > 3 ? 'text-[9px]' : 'text-[11px]',
-        winner ? 'bg-brand-500 text-white' : 'bg-slate-900 text-slate-100 dark:bg-slate-800',
-      )}
-      title={team.org_units?.name ? `${team.name} · ${team.org_units.name}` : team.name}
-    >
-      {teamCode(team)}
-    </span>
-  );
-}
 
 /**
  * Unlocking is a correction, and a correction has to say what it is correcting.
@@ -340,13 +274,59 @@ export function ResultsPage() {
    * In the URL like the rest, so a filtered view is a link somebody can send.
    */
   const [tournamentId, setTournamentId] = useUrlState<string>('tournament', '');
+  // Several sports at once: a comma list in the URL (?sport=Football,Volleyball).
   const [sportId, setSportId] = useUrlState<string>('sport', '');
+  const pickedSports = useMemo(() => (sportId ? sportId.split(',') : []), [sportId]);
+
+  // A ranking event (swimming, powerlifting) has no home/away: its squads are the ones
+  // entered in its draw. Knockout TBD slots stay team-less, as they should.
+  const { data: squads = [] } = useApi<Side[] & any[]>(`/teams?championship_id=${eventId}`);
+  const entrants = useMemo(() => {
+    const m = new Map<string, Side[]>();
+    for (const sq of squads as any[]) {
+      for (const e of sq.team_entries ?? []) {
+        if (e.tournament_discipline_id) m.set(e.tournament_discipline_id, [...(m.get(e.tournament_discipline_id) ?? []), sq]);
+      }
+    }
+    return m;
+  }, [squads]);
+  const squadsIn = (f: ResultRow): Side[] => (f.home || f.away
+    ? [f.home, f.away].filter((s): s is Side => !!s)
+    : isRankingSport(f.sport) && f.tournament_discipline_id ? entrants.get(f.tournament_discipline_id) ?? [] : []);
+  const playedBy = (f: ResultRow, ids: Set<string>) => squadsIn(f).some((s) => ids.has(s.id));
+
+  // Institute badges, the same as Schedule: every squad an institute (or batch) fields.
+  const [sideKey, setSideKey] = useUrlState<string>('side', '');
+  const sides = useMemo(() => {
+    const map = new Map<string, TeamSide>();
+    for (const f of fixtures) {
+      if (!RESULTABLE.has(f.status)) continue;
+      for (const s of squadsIn(f)) {
+        if (!s) continue;
+        const key = s.org_units?.id ? `u:${s.org_units.id}` : `o:${s.organizations?.short_name || s.organizations?.name || s.id}`;
+        const e = map.get(key) ?? { key, label: teamCode(s), full: teamLabel(s), logo: null, ids: new Set<string>(), matches: 0, live: 0 };
+        e.ids.add(s.id);
+        map.set(key, e);
+      }
+    }
+    for (const f of fixtures) {
+      if (!RESULTABLE.has(f.status)) continue;
+      for (const e of map.values()) {
+        if (playedBy(f, e.ids)) { e.matches += 1; if (f.status === 'live') e.live += 1; }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixtures, entrants]);
+  const pickedSide = sides.find((s) => s.key === sideKey);
 
   const rows = useMemo(
     () => fixtures.filter((f) =>
       (!tournamentId || f.tournament?.id === tournamentId) &&
-      (!sportId || f.sport === sportId)),
-    [fixtures, tournamentId, sportId],
+      (!pickedSports.length || (!!f.sport && pickedSports.includes(f.sport))) &&
+      (!pickedSide || playedBy(f, pickedSide.ids))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fixtures, tournamentId, pickedSports, pickedSide, entrants],
   );
 
   // Group matches by their draw (sport + discipline) so the list reads as sections
@@ -367,7 +347,6 @@ export function ResultsPage() {
   const manages = (f: ResultRow) => canManageSport(f.sport_id);
   // Still opens while archived - the scoring page is read-only then, so the host can view the result.
   const canScore = (f: ResultRow) => manages(f) || (!!myId && f.official_id === myId);
-  const scoresAny = organises || rows.some(canScore);
 
   const open = (f: ResultRow) => {
     if (!canScore(f)) return;
@@ -463,7 +442,7 @@ export function ResultsPage() {
    * first), and what has been waiting longest for a decision (oldest first). Kept
    * in the URL beside the queue filter so a view can be returned to.
    */
-  const [sort, setSort] = useUrlState<string>('sort', 'match');
+  const [sort] = useUrlState<string>('sort', 'match');
   const sortRows = useMemo(() => {
     const byDate = (a: ResultRow, b: ResultRow, dir: number) => {
       // An unscheduled fixture has no place in a date ordering, so it goes last
@@ -603,24 +582,73 @@ export function ResultsPage() {
     } finally { setBusyId(null); }
   };
 
+  // The same banner as Schedule, counting the results pipeline instead of the clock.
+  const pulseTiles: PulseTile[] = [
+    { key: 'pending', label: 'Being played', hint: 'Not finished yet', icon: Radio, count: queueCounts.pending, live: true,
+      on: 'bg-rose-500 text-white ring-rose-300', idle: 'text-rose-600 dark:text-rose-300' },
+    { key: 'ready', label: 'Awaiting review', hint: 'Finished, not official', icon: Clock, count: queueCounts.ready,
+      on: 'bg-amber-400 text-amber-950 ring-amber-200', idle: 'text-amber-600 dark:text-amber-300' },
+    { key: 'locked', label: 'Official', hint: 'Locked and published', icon: ShieldCheck, count: queueCounts.locked,
+      on: 'bg-emerald-500 text-white ring-emerald-200', idle: 'text-emerald-600 dark:text-emerald-300' },
+  ];
+
+  // Sport chips filter the page. Every sport gets one (not just the picked one),
+  // counted within the tournament and institute filters. The filter keys on the name.
+  const chipSports = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; icon: string | null; live: number; total: number }>();
+    for (const f of fixtures) {
+      if (!f.sport || !RESULTABLE.has(f.status)) continue;
+      if (tournamentId && f.tournament?.id !== tournamentId) continue;
+      if (pickedSide && !playedBy(f, pickedSide.ids)) continue;
+      const e = m.get(f.sport) ?? { id: f.sport, name: f.sport, icon: f.sport_icon, live: 0, total: 0 };
+      e.total += 1; if (f.status === 'live') e.live += 1;
+      m.set(f.sport, e);
+    }
+    return [...m.values()].sort((a, b) => b.live - a.live || a.name.localeCompare(b.name));
+  }, [fixtures, tournamentId, pickedSide]);
+
+  // The live strip (moved here from Schedule): matches in play, within the current filters.
+  const stripItems = rows.filter((f) => f.status === 'live').map((f) => ({
+    f, sport: f.sport ?? 'Sport', icon: f.sport_icon, draw: f.discipline ?? '',
+    home: teamLabel(f.home) || TBD_LABEL, away: teamLabel(f.away) || TBD_LABEL, homeShort: teamCode(f.home), awayShort: teamCode(f.away),
+  }));
+
+  // Category tabs: each sport's draws in Men > Women > Mixed order, and the pick per sport.
+  const [catBySport, setCatBySport] = useState<Record<string, string>>({});
+  const categoriesOf = (sid: string | null) => sortByCategory(groups.filter((x) => x.sportId === sid), (x) => x.discipline ?? '');
+  const sportOrder = [...new Set(groups.map((x) => x.sportId))];
+
+  // A squad as the shared match card shows it.
+  const cardSide = (s: Side | null): CardSide => (s
+    ? { id: s.id, full: teamLabel(s) || teamShort(s), short: teamCode(s), org: '', slotLabel: TBD_LABEL }
+    : { id: null, full: null, short: null, org: '', slotLabel: TBD_LABEL });
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="hidden text-sm text-slate-500 sm:block dark:text-slate-400">
-          {organises
-            ? 'Tap a match to enter its result. Standings recalculate instantly.'
-            : scoresAny
-              ? 'Tap a match you are officiating to record its result.'
-              : 'Live scores and final results across the championship.'}
-        </p>
-        {/* Background refresh keeps the list visible while the latest scores are
-            pulled. The slot holds its width whether or not it is showing anything:
-            an indicator that appears and disappears in a flex row was one of the
-            things nudging the list under the reader between renders. */}
-        <div className="min-w-[7.5rem] shrink-0 text-right" aria-live="polite">
-          {isFetching && !isLoading && <Spinner label="Refreshing…" />}
-        </div>
+    <div className="relative space-y-5">
+      <BackToTop />
+      {/* Background refresh: floats in the corner so it never moves the page. */}
+      <div className="pointer-events-none absolute right-0 top-0 z-10" aria-live="polite">
+        {isFetching && !isLoading && <Spinner label="Refreshing…" />}
       </div>
+
+      <TeamChips sides={sides} value={sideKey} onChange={setSideKey} />
+
+      {isLoading
+        ? <BannerSkeleton tiles={3} />
+        : (
+          <PulseBanner
+            eyebrow={pickedSide ? `${pickedSide.full} · results` : 'Results'}
+            done={queueCounts.locked} total={queueCounts.all} unit="results official" pctLabel="of played matches official"
+            empty="No results yet - matches appear here once scoring starts."
+            tiles={pulseTiles} value={queue === 'all' ? '' : queue} onChange={(k) => setQueue(k || 'all')}
+          />
+        )}
+
+      {queue === 'all' && (
+        <LiveStrip liveOnly items={stripItems} renderAction={(f) => canScore(f) && (
+          <Button size="sm" onClick={() => open(f)}>{archived ? 'View' : 'Resume'}</Button>
+        )} />
+      )}
 
       {customActive && organises && (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
@@ -628,20 +656,14 @@ export function ResultsPage() {
         </div>
       )}
 
-      {/* The lock queue. Shown only while there is something to do with it - an
-          organiser with nothing finished does not need to be told a number. */}
+      {/* The lock queue, shown only while there is something to do with it. */}
       {organises && readyRows.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2.5 text-sm text-brand-800 sm:px-4 sm:py-3 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 sm:px-4 sm:py-3 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <div className="min-w-0 flex-1">
             <span className="font-semibold">
               {readyRows.length} finished {readyRows.length === 1 ? 'result is' : 'results are'} waiting to be made official.
             </span>
-            {/* The explanation is for the first time somebody sees this, not the
-                fiftieth, and on a phone it was three of the banner's four lines. */}
-            <span className="hidden sm:inline">
-              {' '}Locking publishes the standings and is what certificates are issued from.
-            </span>
-            {lockedCount > 0 && <span className="text-brand-600/80 dark:text-brand-300/70"> {lockedCount} already locked.</span>}
+            <span className="hidden sm:inline"> Locking publishes the standings and is what certificates are issued from.</span>
           </div>
           <Button size="sm" disabled={busyId !== null || archived} onClick={lockAllReady}>
             <Lock size={14} /> {busyId === 'bulk' ? 'Locking…' : `Lock ${Math.min(readyRows.length, 50)}`}
@@ -651,29 +673,13 @@ export function ResultsPage() {
 
       <AwardsBoard awards={board?.event ?? []} />
 
-      {/* The queue. An organiser mid-event wants the ones that need them. */}
-      {playable.length > 0 && (
-        <FilterChips
-          label="Show"
-          value={queue}
-          onChange={setQueue}
-          options={[
-            { key: 'all', label: 'All matches', count: queueCounts.all },
-            { key: 'ready', label: 'Awaiting review', count: queueCounts.ready },
-            { key: 'pending', label: 'Being played', count: queueCounts.pending },
-            { key: 'locked', label: 'Official', count: queueCounts.locked },
-          ]}
-        />
-      )}
+      <SportChips sports={chipSports} value={pickedSports} onChange={(ids) => setSportId(ids.join(','))} />
 
-      {/* Tournament, sport and sort - the axes that used to be split between the app
-          header and here. One row, wrapping, on the page's own margin. */}
-      {(tournamentOptions.length > 0 || sportOptions.length > 0 || playable.length > 1) && (
-        // Phone: the two filters as equal columns (stacked at their own widths they read
-        // ragged), sort on its own line. From sm: one wrapping row, as before.
-        <div className="-mt-1 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-          {tournamentOptions.length > 0 && (
-            <div className={cn(PHONE_FILL, sportOptions.length === 0 && 'col-span-2')}>
+      {/* Tournament filter and Clear: shown only when there is something to offer. */}
+      {(tournamentOptions.length > 1 || tournamentId || sportId || sideKey) && (
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          {tournamentOptions.length > 1 && (
+            <div className={cn(PHONE_FILL, 'col-span-2 sm:col-span-1')}>
               <Select value={tournamentId} onChange={(e) => setTournamentId(e.target.value)}
                 aria-label="Filter by tournament" className="!py-1.5 text-[13px]">
                 <option value="">All tournaments</option>
@@ -681,38 +687,15 @@ export function ResultsPage() {
               </Select>
             </div>
           )}
-          {sportOptions.length > 0 && (
-            <div className={cn(PHONE_FILL, tournamentOptions.length === 0 && 'col-span-2')}>
-              <Select value={sportId} onChange={(e) => setSportId(e.target.value)}
-                aria-label="Filter by sport" className="!py-1.5 text-[13px]">
-                <option value="">All sports</option>
-                {sportOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-              </Select>
-            </div>
-          )}
-          {(tournamentId || sportId) && (
-            <Button size="sm" variant="ghost" onClick={() => { setTournamentId(''); setSportId(''); }}>
+          {(tournamentId || sportId || sideKey) && (
+            <Button size="sm" variant="ghost" onClick={() => { setTournamentId(''); setSportId(''); setSideKey(''); }}>
               Clear
             </Button>
-          )}
-          {playable.length > 1 && (
-            <div className="col-span-2 flex items-center justify-end gap-2 sm:ml-auto">
-              <label className="t-eyebrow" htmlFor="results-sort">Sort</label>
-              <Select id="results-sort" value={sort} onChange={(e) => setSort(e.target.value)} className="!py-1.5 text-[13px]">
-                <option value="match">Match number</option>
-                <option value="soonest">Soonest first</option>
-                <option value="latest">Latest first</option>
-              </Select>
-            </div>
           )}
         </div>
       )}
 
-      {/* Said once, quietly, so the missing cards are not a mystery - and now with a
-          way to act on it. This used to read "start them from Schedule", which was a
-          dead end: Schedule had no scoring entry point, so the only way to start a
-          match was to edit its status field by hand. Schedule has a Score button on
-          every row now, and this links straight there. */}
+      {/* Said once, quietly, so the missing cards are not a mystery. */}
       {hiddenCount > 0 && (
         <p className="t-meta">
           {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here -
@@ -723,382 +706,194 @@ export function ResultsPage() {
         </p>
       )}
 
-      {isLoading ? <Spinner /> : visibleRows.length === 0 ? (
+      {isLoading ? <div className="space-y-6"><SportSectionSkeleton /><SportSectionSkeleton cards={2} /></div> : visibleRows.length === 0 ? (
         <EmptyState
           icon={<Flag size={24} />}
           title={fixtures.length === 0 ? 'No fixtures yet'
             : queue === 'ready' ? 'Nothing waiting to be made official'
             : queue === 'locked' ? 'No results are official yet'
             : queue === 'pending' ? 'Everything here has been played'
-            : 'No matches for this sport'}
+            : 'No matches for this filter'}
           description={fixtures.length === 0
             ? (organises ? 'Generate draws on the Schedule tab - matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
-            : queue !== 'all' ? 'Nothing in this view. Choose "All matches" to see the rest.'
-            : 'Clear the sport filter or pick another sport.'}
+            : queue !== 'all' ? 'Nothing in this view. Tap the tile again to see everything.'
+            : 'Clear the filters or pick another sport.'}
         />
       ) : (
         <div className="space-y-6">
-          {groups.map((g) => (
-            <section key={g.key} className="space-y-2">
-              {firstGroupOfSport(g.key, g.sportId) && sportHasTally(sportTallyOf(g.sportId)) && (
-                <TitleTallyCard tally={sportTallyOf(g.sportId)!} />
-              )}
-              <div className="flex items-center gap-2 px-1">
-                <span className="text-base">{g.icon ?? '◇'}</span>
-                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
-                  {g.sport ?? 'Sport'}
-                  {g.discipline && <span className="font-medium text-slate-400 dark:text-slate-500"> · {g.discipline}</span>}
-                </h3>
-                <Badge tone="slate">{g.rows.length}</Badge>
-                {hasTally(g.drawId) && (
-                  <Segmented size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
-                    onChange={(v) => setTally(g.drawId!, v === 'tally')}
-                    options={[{ value: 'matches', label: 'Matches' }, {
-                      value: 'tally',
-                      // Event tallies have no group ties, so only table draws can carry the dot.
-                      label: eventTallyOf(g.drawId!) ? 'Point tally'
-                        : <TallyTabLabel drawId={g.drawId!} canManage={canManageSport(g.sportId) && !archived} />,
-                    }]} />
-                )}
-              </div>
-
-              {g.drawId && tallyOpen.has(g.drawId) && hasTally(g.drawId)
-                ? (eventTallyOf(g.drawId)
-                  ? <EventTallyTable event={eventTallyOf(g.drawId)!} />
-                  : <GroupTables drawId={g.drawId} canManage={canManageSport(g.sportId) && !archived} />)
-                : g.rows.map((f) => {
-                // Ranking events (powerlifting/swimming/athletics) have no head-to-head
-                // matchup - the generator emits one team-less fixture with round 'Event'.
-                // Showing "TBD vs TBD" there is wrong: there's no opponent to decide, so
-                // we show the discipline name + a Ranking event tag instead.
-                //
-                // This is NOT the same thing as `entry_type === 'individual'` - that just
-                // means one competitor per side (singles badminton, a boxing bout, a
-                // Knockout draw of individual shooters), and plenty of individual-entry
-                // disciplines are real head-to-head matches with two actual opponents and
-                // a score, exactly like a team match. Gating on entry_type alone hid a
-                // completed Knockout shooting final's real 36-46 scoreline behind a
-                // "Ranking event" badge and two empty slots - the bracket had an opponent
-                // and a winner the whole time; only THIS page refused to show either.
-                const rankingEvent = f.round === 'Event' && !f.home && !f.away;
-                // A walkover is decided too, so it gets Edit, not Record.
-                const walkover = f.status === 'walkover';
-                const completed = f.status === 'completed' || f.status === 'confirmed' || walkover;
-                const isLocked = locked(f);
-                const scored = !rankingEvent && f.home_score != null && f.away_score != null;
-                const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
-                const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
-                // A walkover has no play to read the winner from, so it gets a tick by the name.
-                const woTick = (won: boolean) => walkover && won && (
-                  <Check size={15} strokeWidth={3} className="shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Won by walkover" />
-                );
-                // Stopped early (retired / disqualified / conceded): marked beside the side
-                // that stopped, so an unfinished score never reads as a match played out.
-                const early = earlyEndOf(f.live_state);
-                // How it went, home first: carrom game scores, chess game results or ending.
-                const summary = scored ? resultSummary(f.sport, f.live_state) : null;
-                const endNote = early ? earlyEndNoteOf(f.live_state) : null;
-                const earlyNote = (won: boolean) => early && scored && !won && (homeWon || awayWon) && (
-                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400" title={endNote ?? undefined}>({EARLY_END_LABEL[early]})</span>
-                );
-                // Level after play and settled on penalties: the kicks sit beside the score.
-                const pens = scored ? shootoutOf(f.live_state) : null;
-                // Kho kho: a minimum chase (score still level) or a win by an innings.
-                const khoEnd = scored ? khoSettlementOf(f.live_state) : null;
-                const pensNote = (kicks: number) => pens && (
-                  <span className="ml-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({kicks})</span>
-                );
-                return (
-                  // TWO LAYOUTS, NOT ONE THAT SCROLLS.
-                  //
-                  // This used to be a single row that was wider than a phone, made
-                  // into a horizontal scroll container with the actions pinned to the
-                  // right edge. That is not a layout - it is a desktop row you have
-                  // to drag, and the two things an organiser needs mid-event (the
-                  // score and the lock) were the two furthest off-screen.
-                  //
-                  // Below sm it is a scoreboard: meta line, then one line per side
-                  // with the squad's short name and its score, then the actions. The
-                  // shape everybody already reads on a sports app, and it fits 390px
-                  // with room left over. At sm+ the original three-column grid is
-                  // untouched.
-                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(min-content,1fr)_auto_minmax(max-content,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
-
-                    {/* ---------------- phone ---------------- */}
-                    <div className="flex flex-col gap-1 px-3 py-2 lg:hidden">
-                      {/* Round, status and actions on ONE line. They were a header
-                          row and a footer row with a divider between them, which
-                          cost ~70px per card - and there are 224 cards. Nothing is
-                          dropped: the actions are icons, so all three fit beside a
-                          status that is itself a glyph and one word. */}
-                      <div className="flex items-center gap-2">
-                        {/* The number first: it is the handle somebody uses out loud
-                            ("score match 14"), and two team names are not unique in
-                            a round robin where the same pair meets twice. */}
-                        {f.match_no != null && (
-                          <span className="t-num shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                            #{f.match_no}
-                          </span>
-                        )}
-                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]">
-                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
-                        </span>
-                        <StatusGlyph locked={isLocked} rankingEvent={rankingEvent} status={f.status} />
-                        {manages(f) && (
-                          <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            {/* `expressive` reveals the word from sm up. This card
-                                layout now serves phones AND tablets, and a tablet
-                                has the width for "Reopen" beside the glyph - only a
-                                390px row genuinely cannot spare it. */}
-                            {isLocked && (
-                              <IconAction expressive short="Reopen" tone="warn"
-                                label="Reopen this result" onClick={() => setUnlocking(f)} disabled={busyId !== null || archived}>
-                                <LockOpen size={16} />
-                              </IconAction>
-                            )}
-                            {lockable(f) && (
-                              <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
-                                label="Make this result official"
-                                onClick={() => void lockOne(f)} disabled={busyId !== null || archived} busy={busyId === f.id}>
-                                <Lock size={16} />
-                              </IconAction>
-                            )}
-                            <IconAction
-                              expressive
-                              short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}
-                              label={isLocked ? 'View scorecard' : completed ? 'Edit result' : 'Record result'}
-                              tone={!isLocked && !completed ? 'primary' : undefined}
-                              onClick={() => open(f)}>
-                              {isLocked ? <Eye size={16} /> : completed ? <Pencil size={16} /> : <ChevronRight size={17} />}
-                            </IconAction>
-                          </span>
-                        )}
+          {sportOrder.map((sid) => {
+            // One section per sport, in a fixed order; its picked category renders, the rest are tabs.
+            const cats = categoriesOf(sid);
+            const g = cats.find((x) => x.key === catBySport[sid ?? '']) ?? cats[0];
+            if (!g) return null;
+            const firstOfSport = true;
+            const sportRows = visibleRows.filter((f) => f.sport_id === g.sportId);
+            const sportLive = sportRows.filter((f) => f.status === 'live').length;
+            const sportOfficial = sportRows.filter(locked).length;
+            const live = g.rows.filter((f) => f.status === 'live').length;
+            const official = g.rows.filter(locked).length;
+            return (
+              <div key={g.key} className="space-y-3">
+                {firstOfSport && (
+                  <div id={g.sportId ? `sport-${g.sportId}` : undefined} className="scroll-mt-24 space-y-3">
+                    {/* The same sport heading as Schedule. */}
+                    <div className="flex items-center gap-3">
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 text-2xl shadow-sm ring-1 ring-brand-200/60 dark:from-brand-500/15 dark:to-brand-500/5 dark:ring-brand-500/20" aria-hidden>
+                        {g.icon || '🏅'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">{g.sport ?? 'Sport'}</h3>
+                        <div className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400">
+                          <span>{sportRows.length} result{sportRows.length === 1 ? '' : 's'}</span>
+                          {sportLive > 0 && <><span aria-hidden>·</span><span className="font-bold text-rose-600 dark:text-rose-300">{sportLive} live</span></>}
+                          <span aria-hidden>·</span><span>{sportOfficial} official</span>
+                        </div>
                       </div>
-
-                      {/* The venue on its own line: at the end of the line above it was
-                          almost always the part cut off. Truncates only past the card's width. */}
-                      {f.ground && (
-                        <div className="t-meta -mt-0.5 flex min-w-0 items-center gap-1 text-[12px]" title={venueLabel(f.ground)}>
-                          <MapPin size={11} className="shrink-0" aria-hidden />
-                          <span className="truncate">{venueLabel(f.ground)}</span>
-                        </div>
-                      )}
-
-                      {rankingEvent ? (
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
-                            {f.discipline ?? f.sport ?? 'Event'}
-                          </span>
-                          <Badge tone="violet">Ranking</Badge>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-0.5">
-                          {([[f.home, f.home_score, homeWon], [f.away, f.away_score, awayWon]] as const).map(([side, score, won], i) => (
-                            <div key={i} className="flex items-baseline gap-2.5">
-                              {/* No chip here. It carried a 3-letter slice of the
-                                  same name the text now shows in full-short form -
-                                  "BT23" beside "BT2023" - so it was 44px spent
-                                  saying the thing twice. The winner is carried by
-                                  weight instead, which needs no width at all. */}
-                              <span
-                                className={cn(
-                                  'min-w-0 flex-1 truncate text-[15px] leading-6 tracking-tight',
-                                  won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-semibold text-slate-600 dark:text-slate-300',
-                                )}
-                                title={teamLabel(side)}
-                              >
-                                {/* THE FULL NAME, TRUNCATED - not the abbreviation.
-                                    The row is `min-w-0 flex-1 truncate`, so a long
-                                    name ellipsises and can never push the score off
-                                    the card; that is what made the horizontal scroll
-                                    unnecessary, not shortening the text. With the
-                                    abbreviation in this slot a 390px row read "DB"
-                                    against "PB" with 200px of nothing between them -
-                                    less information than the full name AND worse
-                                    looking. The short name stays the fallback for a
-                                    squad that has no full name to show. */}
-                                {side ? (teamLabel(side) || teamShort(side)) : TBD_LABEL}
-                              </span>
-                              {woTick(won)}
-                              <span
-                                className={cn(
-                                  't-num shrink-0 text-[17px] leading-6 tabular-nums',
-                                  won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-bold text-slate-700 dark:text-slate-300',
-                                )}
-                              >
-                                {scored ? formatPoints(score)
-                                  : walkover && won ? <span className="text-[12px] font-bold text-slate-500 dark:text-slate-400">W/O</span>
-                                  : <span className="text-slate-300 dark:text-slate-600">·</span>}
-                                {earlyNote(won)}
-                                {pens && pensNote(i === 0 ? pens.home : pens.away)}
-                              </span>
-                            </div>
-                          ))}
-                          {khoEnd && (
-                            <span className="truncate text-[12px] font-semibold text-brand-600 dark:text-brand-400">
-                              {teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} {KHO_END_LABEL[khoEnd.reason]}
-                            </span>
-                          )}
-                          {summary && <span className="t-num truncate text-[12px] text-slate-500 dark:text-slate-400">{summary}</span>}
-                        </div>
-                      )}
-
                     </div>
-
-                    {/* ---------------- lg+ : the three-column row ---------------- */}
-                    <div className="hidden items-center gap-x-2 lg:contents">
-                    {/* Left cell (1fr): match type - always shown in full.
-                        Both outer cells are equal 1fr so the auto center column is
-                        always physically centered regardless of their content widths. */}
-                    {/* Each line carries its own tooltip, so a cut-off line shows ITS full text
-                        on hover - one tooltip on the block showed the round over every line. */}
-                    <div className="min-w-0 text-xs text-slate-500 dark:text-slate-400">
-                      {/* contain:inline-size on the round and venue lines: they fit the
-                          column and truncate, but never widen it - only the time sets its minimum. */}
-                      <div className="flex items-center gap-1.5 [contain:inline-size]">
-                        {f.match_no != null && (
-                          <span className="t-num rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                            #{f.match_no}
-                          </span>
-                        )}
-                        <span className="truncate font-semibold uppercase tracking-wide" title={f.round ?? undefined}>{f.round || '-'}</span>
-                      </div>
-                      {/* When it is played. It was on the Schedule tab and nowhere
-                          near the result being recorded, which is where somebody
-                          checking "is this the right match?" is standing. */}
-                      {/* Never cut: it is short, and the column is at least this wide. */}
-                      <div className="mt-0.5 whitespace-nowrap">{whenLabel(f.scheduled_at)}</div>
-                      {f.ground && (
-                        <div className="mt-0.5 flex min-w-0 items-center gap-1 [contain:inline-size]" title={venueLabel(f.ground)}>
-                          <MapPin size={11} className="shrink-0" aria-hidden />
-                          <span className="truncate">{venueLabel(f.ground)}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Center cell (auto): home · score · away. Ranking/event fixtures
-                        have no head-to-head matchup, so show the event (discipline) name
-                        instead of two empty team chips. */}
-                    <div className="flex flex-col items-center gap-0.5">
-                    {/* name | score | name: two EQUAL name columns, 7-16rem, so the score
-                        stays centred and short names never wrap just to match the other. */}
-                    <div className={rankingEvent ? 'flex items-center gap-2 sm:gap-3'
-                      : 'grid grid-cols-[minmax(7rem,16rem)_4rem_minmax(7rem,16rem)] items-center gap-x-3'}>
-                      {rankingEvent ? (
-                        <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
-                          <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
-                            {f.discipline ?? f.sport ?? 'Event'}
-                          </span>
-                          <Badge tone="violet">Ranking event</Badge>
-                        </div>
-                      ) : (
-                        <>
-                          {/* Full names, wrapping to a second line - "…" only past two lines. */}
-                          <div className="flex min-w-0 items-center justify-end gap-2">
-                            {woTick(homeWon)}
-                            {f.home && <span className={cn(DESKTOP_NAME, 'text-right')} title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
-                            <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
-                          </div>
-                          <span className="flex w-16 shrink-0 flex-col items-center whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                            {scored ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}`
-                              : walkover ? <span className="text-base text-slate-500 dark:text-slate-400" title="Walkover">W/O</span>
-                              : <span className="text-slate-300 dark:text-slate-600">··</span>}
-                            {/* A walkover with a rulebook score (football 2-0): the score above, W/O under it. */}
-                            {walkover && scored && (
-                              <span className="text-[10px] font-semibold leading-3 text-slate-500 dark:text-slate-400">W/O</span>
-                            )}
-                            {early && scored && (
-                              <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400"
-                                title={`${teamLabel(homeWon ? f.away : f.home)} ${early === 'retired' ? 'retired' : early}`}>
-                                {EARLY_END_LABEL[early]}
-                              </span>
-                            )}
-                            {pens && (
-                              <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
-                                title={`${teamLabel(pens.winner === 'A' ? f.home : f.away)} won on penalties`}>
-                                {shootoutLabel(pens.home, pens.away, f.sport)}
-                              </span>
-                            )}
-                            {khoEnd && (
-                              <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
-                                title={`${teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} ${KHO_END_LABEL[khoEnd.reason]}`}>
-                                {KHO_END_SHORT[khoEnd.reason]}
-                              </span>
-                            )}
-                          </span>
-                          <div className="flex min-w-0 items-center gap-2">
-                            <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
-                            {f.away && <span className={DESKTOP_NAME} title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
-                            {woTick(awayWon)}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    {summary && <span className="t-num text-xs text-slate-500 dark:text-slate-400">{summary}</span>}
-                    </div>
-
-                    {/* Right cell (1fr): status + actions.
-                        THE SAME VOCABULARY AS THE PHONE, SPOKEN MORE FULLY. The
-                        phone gives each action a glyph because that is all that
-                        fits; here the glyph keeps its word beside it. Same
-                        components, same icons, same colours - so somebody who
-                        learns "🔓 reopens this" on a laptop recognises the bare
-                        glyph on their phone at the pitch.
-                        "Record" was a bare text link and the only affordance that
-                        did not look like a button, which on the most-used action of
-                        the page was the wrong way round. */}
-                    <div className="flex items-center justify-end gap-2">
-                      {isLocked ? (
-                        // The lock outranks the match status here: "completed" and
-                        // "official" are different claims, and this cell can only
-                        // lead with one of them.
-                        <StatusBadge status="locked" label="Locked" />
-                      ) : rankingEvent ? (
-                        <StatusBadge status="" label="Individual" />
-                      ) : (
-                        <StatusBadge status={f.status} />
-                      )}
-                      {/* Every one of these stops the click reaching the card -
-                          otherwise locking a result also navigates away from the
-                          list. */}
-                      {manages(f) && isLocked && (
-                        <IconAction expressive short="Reopen" tone="warn"
-                          label="Reopen this result" disabled={busyId !== null || archived}
-                          onClick={() => setUnlocking(f)}>
-                          <LockOpen size={15} />
-                        </IconAction>
-                      )}
-                      {manages(f) && lockable(f) && (
-                        <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
-                          label="Make this result official" disabled={busyId !== null || archived} busy={busyId === f.id}
-                          onClick={() => void lockOne(f)}>
-                          <Lock size={15} />
-                        </IconAction>
-                      )}
-                      {manages(f) && (
-                        <IconAction
-                          expressive
-                          short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}
-                          tone={!isLocked && !completed ? 'primary' : undefined}
-                          label={isLocked ? 'View scorecard' : completed ? 'Edit result' : 'Record result'}
-                          onClick={() => open(f)}
-                        >
-                          {isLocked ? <Eye size={15} /> : completed ? <Pencil size={15} /> : <ChevronRight size={16} />}
-                        </IconAction>
-                      )}
-                    </div>
-                    </div>
-                    {/* Who won what in this match - full width under both layouts. */}
-                    {awardsByFixture.has(f.id) && (
-                      <div className="border-t border-slate-100 px-3 py-1.5 lg:col-span-3 lg:mt-2 lg:border-0 lg:px-0 lg:py-0 dark:border-slate-800">
-                        <MatchAwardsLine awards={awardsByFixture.get(f.id)!} />
+                    {sportHasTally(sportTallyOf(g.sportId)) && <TitleTallyCard tally={sportTallyOf(g.sportId)!} />}
+                    {cats.length > 1 && (
+                      <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+                        <ViewTabs value={g.key} onChange={(k) => setCatBySport((m) => ({ ...m, [g.sportId ?? '']: k }))}
+                          options={cats.map((c) => {
+                            const live = c.rows.filter((f) => f.status === 'live').length;
+                            return {
+                              value: c.key, label: c.discipline ?? c.sport ?? 'Matches',
+                              badge: live > 0 ? <span className="ml-1 rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{live}</span> : undefined,
+                            };
+                          })} />
                       </div>
                     )}
-                  </Card>
-                );
-              })}
-            </section>
-          ))}
+                  </div>
+                )}
+
+                {/* One card per category, like Schedule's draw cards. */}
+                <Card className="min-w-0 p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-[min(100%,16rem)] flex-1 items-center gap-3">
+                      {queue === 'all' && g.rows.length > 0 && official < g.rows.length && <ProgressRing done={official} live={live} total={g.rows.length} />}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-base font-bold text-slate-900 dark:text-slate-100">{g.discipline ?? g.sport ?? 'Matches'}</span>
+                          {queue === 'all' && g.rows.length > 0 && official === g.rows.length && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                              <ShieldCheck size={12} aria-hidden />All official
+                            </span>
+                          )}
+                          {live > 0 && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">{live} live</span>}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          {g.rows.length} result{g.rows.length === 1 ? '' : 's'} · {official} official
+                        </div>
+                      </div>
+                    </div>
+                    {hasTally(g.drawId) && (
+                      <Segmented size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
+                        onChange={(v) => setTally(g.drawId!, v === 'tally')}
+                        options={[{ value: 'matches', label: 'Matches' }, {
+                          value: 'tally',
+                          // Event tallies have no group ties, so only table draws can carry the dot.
+                          label: eventTallyOf(g.drawId!) ? 'Point tally'
+                            : <TallyTabLabel drawId={g.drawId!} canManage={canManageSport(g.sportId) && !archived} />,
+                        }]} />
+                    )}
+                  </div>
+
+                  {g.drawId && tallyOpen.has(g.drawId) && hasTally(g.drawId)
+                    ? (eventTallyOf(g.drawId)
+                      ? <EventTallyTable event={eventTallyOf(g.drawId)!} />
+                      : <GroupTables drawId={g.drawId} canManage={canManageSport(g.sportId) && !archived} />)
+                    : (
+                      <div className="@container space-y-2">
+                        {g.rows.map((f) => {
+                          // Ranking events (swimming/powerlifting) have no head-to-head:
+                          // one team-less fixture with round 'Event'.
+                          const rankingEvent = f.round === 'Event' && !f.home && !f.away;
+                          const walkover = f.status === 'walkover';
+                          const completed = f.status === 'completed' || f.status === 'confirmed' || walkover;
+                          const isLocked = locked(f);
+                          const scored = !rankingEvent && f.home_score != null && f.away_score != null;
+                          const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
+                          const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
+                          // Stopped early: marked beside the side that stopped.
+                          const early = earlyEndOf(f.live_state);
+                          const endNote = early ? earlyEndNoteOf(f.live_state) : null;
+                          const summary = scored ? resultSummary(f.sport, f.live_state) : null;
+                          const pens = scored ? shootoutOf(f.live_state) : null;
+                          const khoEnd = scored ? khoSettlementOf(f.live_state) : null;
+                          const scoreNote = (side: 'home' | 'away') => {
+                            const won = side === 'home' ? homeWon : awayWon;
+                            return (
+                              <>
+                                {early && scored && !won && (homeWon || awayWon) && (
+                                  <span className="shrink-0 text-[11px] font-semibold text-amber-600 dark:text-amber-400" title={endNote ?? undefined}>{EARLY_END_LABEL[early]}</span>
+                                )}
+                                {pens && (
+                                  <span className="shrink-0 text-[11px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({side === 'home' ? pens.home : pens.away})</span>
+                                )}
+                              </>
+                            );
+                          };
+                          const footer = (khoEnd || summary || pens || awardsByFixture.has(f.id)) ? (
+                            <div className="mt-1 space-y-0.5 text-[11px]">
+                              {pens && <div className="font-semibold text-brand-600 dark:text-brand-400">{shootoutLabel(pens.home, pens.away, f.sport)}</div>}
+                              {khoEnd && <div className="font-semibold text-brand-600 dark:text-brand-400">{teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} {KHO_END_LABEL[khoEnd.reason]}</div>}
+                              {summary && <div className="tabular-nums text-slate-500 dark:text-slate-400">{summary}</div>}
+                              {awardsByFixture.has(f.id) && <MatchAwardsLine awards={awardsByFixture.get(f.id)!} />}
+                            </div>
+                          ) : null;
+                          const badge = isLocked
+                            ? <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><ShieldCheck size={11} aria-hidden />Official</span>
+                            : lockable(f)
+                              ? <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Awaiting review</span>
+                              : null;
+                          return (
+                            <MatchCard
+                              key={f.id}
+                              f={f}
+                              home={rankingEvent ? undefined : cardSide(f.home)}
+                              away={rankingEvent ? undefined : cardSide(f.away)}
+                              eventTitle={rankingEvent ? (f.discipline ?? f.sport ?? 'Event') : undefined}
+                              sportName={f.sport ?? undefined}
+                              ground={venueLabel(f.ground) || null}
+                              canManage={manages(f)}
+                              badge={badge}
+                              scoreNote={scoreNote}
+                              footer={footer}
+                              onOpen={canScore(f) ? () => open(f) : undefined}
+                              actions={manages(f) && (
+                                <>
+                                  {isLocked && (
+                                    <IconAction expressive short="Reopen" tone="warn"
+                                      label="Reopen this result" onClick={() => setUnlocking(f)} disabled={busyId !== null || archived}>
+                                      <LockOpen size={15} />
+                                    </IconAction>
+                                  )}
+                                  {lockable(f) && (
+                                    <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
+                                      label="Make this result official"
+                                      onClick={() => void lockOne(f)} disabled={busyId !== null || archived} busy={busyId === f.id}>
+                                      <Lock size={15} />
+                                    </IconAction>
+                                  )}
+                                  <IconAction
+                                    expressive
+                                    short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}
+                                    label={isLocked ? 'View scorecard' : completed ? 'Edit result' : 'Record result'}
+                                    tone={!isLocked && !completed ? 'primary' : undefined}
+                                    onClick={() => open(f)}>
+                                    {isLocked ? <Eye size={15} /> : completed ? <Pencil size={15} /> : <ChevronRight size={16} />}
+                                  </IconAction>
+                                </>
+                              )}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                </Card>
+              </div>
+            );
+          })}
         </div>
       )}
 

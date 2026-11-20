@@ -3,7 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes, useMatch } from 'react-router-d
 import { useAuth, type AppRole } from './lib/auth';
 import { returnAfterLogin } from './lib/browserStorage';
 import { AppShell, roleHome } from './components/AppShell';
-import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
+import { ConfirmProvider, ToastProvider } from './components/ui';
+import { SportsLoader } from './components/SportsLoader';
 import { TourProvider } from './components/onboarding/Tour';
 import { HelpPage } from './pages/HelpPage';
 import { PlanPage } from './pages/PlanPage';
@@ -222,22 +223,21 @@ function AppRoutes() {
   // indistinguishable from a phishing page.
   if (inviteMatch?.params.token) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
+  // A full refresh: sport icons and a quote while the session loads.
   if (loading) return (
-    <div className="grid h-screen place-items-center">
-      <div className="grid justify-items-center gap-3 px-4 text-center">
-        <Spinner />
-        {reconnecting && (
-          <>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Can't reach the server. Retrying - you're still signed in.</p>
-            {/* A way out if the server stays down: a fresh page with no saved sign-in. */}
-            <button type="button" className="text-xs font-semibold text-slate-500 underline underline-offset-2 dark:text-slate-400"
-              onClick={() => { logout(); window.location.reload(); }}>
-              Sign out instead
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    <SportsLoader notice={reconnecting && (
+      <>
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
+          Can't reach the server. Retrying - you're still signed in.
+        </span>
+        {/* A way out if the server stays down: a fresh page with no saved sign-in. */}
+        <button type="button" className="font-semibold underline underline-offset-2"
+          onClick={() => { logout(); window.location.reload(); }}>
+          Sign out instead
+        </button>
+      </>
+    )} />
   );
   // Logged out: a public marketing landing page at the root, with the sign-in
   // screen at /login. Any other path falls through to the landing page.
