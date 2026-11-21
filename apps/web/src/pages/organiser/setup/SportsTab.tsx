@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Medal, Pencil, Trash2 } from 'lucide-react';
+import { CalendarRange, ChevronDown, ChevronsDownUp, ChevronsUpDown, Layers, MapPin, Medal, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
@@ -12,7 +12,10 @@ import { TieLayoutEditor, type TieLayoutValue } from '../../../features/scoring/
 import { usePermissions } from '../../../lib/permissions';
 import { isPoolShapedFormat, titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
-import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
+import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, PILL_PICK, SearchInput, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
+import { PickList } from '../../../components/PickList';
+import { IconAction } from '../../../components/CrewPanel';
+import { PillButton, sortByCategory } from '../../../features/schedule/ScheduleParts';
 import { StageConfigWizard } from '../../../components/StageConfigWizard';
 import { useEventPlan } from '../../../lib/eventPlan';
 
@@ -748,9 +751,61 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath, eventId, canEdit }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string; eventId: string; canEdit: boolean }) {
+const META = 'inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400';
+const CHIP = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-bold';
+/** Collapse every card by default past this many sports, so a long list stays scannable. */
+const OPEN_UP_TO = 4;
+
+const countOf = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/** Squad size as a reader would say it; nothing when neither bound is set. */
+function squadLabel(min?: number | null, max?: number | null): string | null {
+  if (min && max) return min === max ? `${min} players` : `${min}-${max} players`;
+  if (max) return `Up to ${max} players`;
+  if (min) return `${min}+ players`;
+  return null;
+}
+
+function DisciplineRow({ d, sportName, format, overridden, venue, canEdit, onEdit, onStages, onDelete, deleting }: {
+  d: any; sportName: string; format?: string; overridden: boolean; venue?: string; canEdit: boolean;
+  onEdit: () => void; onStages?: () => void; onDelete: () => void; deleting: boolean;
+}) {
+  const squad = squadLabel(d.squad_min, d.squad_max);
+  return (
+    <li className="group flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 px-4 py-3 transition-colors hover:bg-slate-50/70 sm:flex-nowrap dark:border-slate-800 dark:hover:bg-slate-800/30">
+      <button type="button" onClick={onEdit} disabled={!canEdit} title={canEdit ? 'Edit discipline' : undefined}
+        className="min-w-0 flex-1 text-left disabled:cursor-default">
+        <span className="block truncate text-sm font-semibold text-slate-800 group-hover:text-brand-700 dark:text-slate-100 dark:group-hover:text-brand-300">
+          {d.disciplines?.name ?? sportName}
+        </span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          {squad && <span className={META}><Users size={12} aria-hidden />{squad}</span>}
+          <span className={cn(META, !venue && 'text-amber-600 dark:text-amber-400')}><MapPin size={12} aria-hidden />{venue ?? 'No venue yet'}</span>
+        </span>
+      </button>
+      <span className="flex flex-wrap items-center gap-1.5">
+        {d.entry_type && <span className={cn(CHIP, 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300')}>{titleCase(d.entry_type)}</span>}
+        {format && (
+          <span title={overridden ? 'Its own format, not the sport\'s' : 'The sport\'s format'}
+            className={cn(CHIP, overridden ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+            {format}
+          </span>
+        )}
+        <StatusBadge status={d.status} />
+      </span>
+      {canEdit && (
+        <span className="ml-auto flex shrink-0 items-center gap-0.5">
+          {onStages && <PillButton icon={Layers} onClick={onStages} title="Pools, groups and what follows them">Stages</PillButton>}
+          <IconAction icon={Pencil} label="Edit discipline" onClick={onEdit} />
+          <IconAction icon={Trash2} danger label="Delete discipline" onClick={onDelete} disabled={deleting} title={deleting ? 'Deleting…' : 'Delete discipline'} />
+        </span>
+      )}
+    </li>
+  );
+}
+
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath, eventId, canEdit, open, onToggle }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string; eventId: string; canEdit: boolean; open: boolean; onToggle: () => void }) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [editingSport, setEditingSport] = useState(false);
@@ -758,6 +813,8 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
   const disciplines = draws; // this sport's draws, sliced from the championship-wide fetch
   // Effective format for a discipline: its own override, else the sport's.
   const effectiveFormat = (d: any) => formats.find((f) => f.id === (d.format_id ?? ts.format_id))?.name;
+  const live = disciplines.filter((d) => d.status === 'ongoing').length;
+  const noVenue = disciplines.filter((d) => !d.venue_id).length;
 
   // Inline delete (also available inside the edit modals) so organisers can remove
   // a sport or discipline straight from the list without opening it first.
@@ -767,78 +824,58 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
   const confirmRemoveDiscipline = async (d: any) => { const name = d.disciplines?.name ?? sportName; if (await confirmDialog({ title: 'Delete discipline', confirmLabel: 'Delete discipline', message: `Delete the “${name}” discipline? Its unplayed fixtures and team entries will be removed. A discipline with completed or scored matches can’t be deleted.` })) removeDiscipline.mutate(d.id, { onError: (e: any) => toast.error(e.message) }); };
 
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 dark:bg-brand-500/10 text-lg">{sportIcon || '◇'}</span>
-          <div>
-            <div className="font-semibold text-slate-900 dark:text-slate-100">{sportName}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{formatName} · {disciplines.length} discipline{disciplines.length === 1 ? '' : 's'}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {canEdit && (
-            <>
-              <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)} aria-label="Edit sport" title="Edit sport">
-                <Pencil size={14} />
-              </Button>
-              <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport} aria-label="Remove sport" title={removeSport.isPending ? 'Removing…' : 'Remove sport'}>
-                <Trash2 size={14} />
-              </Button>
-            </>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} disciplines</Button>
-        </div>
-      </div>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <header className="flex items-center gap-2 px-4 py-3">
+        <button type="button" onClick={onToggle} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-xl dark:bg-brand-500/15" aria-hidden>{sportIcon || '🏅'}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-[15px] font-black text-slate-900 dark:text-slate-100">{sportName}</span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+              <span className={cn(CHIP, 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200')}>{formatName}</span>
+              <span>{countOf(disciplines.length, 'discipline')}</span>
+              {live > 0 && <span className="font-semibold text-emerald-600 dark:text-emerald-400">{live} ongoing</span>}
+              {noVenue > 0 && <span className="font-semibold text-amber-600 dark:text-amber-400">{noVenue} without a venue</span>}
+            </span>
+          </span>
+        </button>
+        {canEdit && (
+          <span className="flex shrink-0 items-center gap-0.5">
+            <IconAction icon={Pencil} label={`Edit ${sportName}`} onClick={() => setEditingSport(true)} title="Edit sport" />
+            <IconAction icon={Trash2} danger label={`Remove ${sportName}`} onClick={confirmRemoveSport} disabled={removeSport.isPending} title={removeSport.isPending ? 'Removing…' : 'Remove sport'} />
+          </span>
+        )}
+        <IconAction icon={ChevronDown} label={open ? 'Hide disciplines' : 'Show disciplines'} onClick={onToggle} />
+      </header>
+
+      {/* Collapsed: the disciplines at a glance. */}
+      {!open && disciplines.length > 0 && (
+        <button type="button" onClick={onToggle} className="flex w-full flex-wrap gap-1.5 px-4 pb-3 text-left sm:pl-[4.75rem]">
+          {disciplines.map((d) => (
+            <span key={d.id} className={cn(CHIP, 'bg-slate-100 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>{d.disciplines?.name ?? sportName}</span>
+          ))}
+        </button>
+      )}
 
       {open && (
-        <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Disciplines</span>
-            {canEdit && <Button size="sm" variant="subtle" onClick={() => setAdding(true)}>+ Add discipline</Button>}
-          </div>
+        <>
           {disciplines.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No disciplines yet. Add one for a whole-sport discipline or per sub-discipline.</p>
+            <p className="border-t border-slate-100 px-4 py-3 text-sm text-slate-400 dark:border-slate-800">No disciplines yet. Add one for the whole sport, or one per category (Men's, Women's, Singles…).</p>
           ) : (
-            <div className="space-y-2">
-              {disciplines.map((d) => {
-                const venue = venues.find((v) => v.id === d.venue_id);
-                return (
-                  <div key={d.id} className="group flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 transition hover:bg-slate-100 dark:hover:bg-slate-800">
-                    <button type="button" onClick={() => setEditing(d)} disabled={!canEdit} className="flex flex-1 items-center justify-between gap-2 text-left disabled:cursor-default">
-                      <div className="text-sm">
-                        <span className="font-medium text-slate-800 dark:text-slate-200">{d.disciplines?.name ?? sportName}</span>
-                        <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {d.entry_type && <Badge tone="info">{titleCase(d.entry_type)}</Badge>}
-                        {effectiveFormat(d) && (
-                          <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
-                        )}
-                        <StatusBadge status={d.status} />
-                        {canEdit && (
-                          <span
-                            aria-label="Edit discipline"
-                            title="Edit discipline"
-                            className="inline-flex items-center rounded-lg bg-brand-50 p-1.5 text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25"
-                          >
-                            <Pencil size={14} />
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                    {canEdit && isPoolShapedFormat(effectiveFormat(d)) && (
-                      <Button size="sm" variant="ghost" className="ml-2 shrink-0" onClick={() => setConfiguringStages(d)}>Configure stages</Button>
-                    )}
-                    {canEdit && (
-                      <button type="button" aria-label="Delete discipline" title={removeDiscipline.isPending ? 'Deleting…' : 'Delete discipline'} disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
-                        className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+            <ul>
+              {disciplines.map((d) => (
+                <DisciplineRow key={d.id} d={d} sportName={sportName} format={effectiveFormat(d)} overridden={!!d.format_id}
+                  venue={venues.find((v) => v.id === d.venue_id)?.name} canEdit={canEdit}
+                  onEdit={() => setEditing(d)} onDelete={() => confirmRemoveDiscipline(d)} deleting={removeDiscipline.isPending}
+                  onStages={isPoolShapedFormat(effectiveFormat(d)) ? () => setConfiguringStages(d) : undefined} />
+              ))}
+            </ul>
+          )}
+          {canEdit && (
+            <div className="border-t border-slate-100 p-2 dark:border-slate-800">
+              <button type="button" onClick={() => setAdding(true)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2 text-[13px] font-semibold text-slate-500 transition hover:border-brand-400 hover:bg-brand-50/50 hover:text-brand-700 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300">
+                <Plus size={14} aria-hidden />Add discipline
+              </button>
             </div>
           )}
           {adding && <AddDisciplineModal tournamentSport={ts} sportName={sportName} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} eventId={eventId} onClose={() => setAdding(false)} />}
@@ -850,7 +887,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
               // A pool-shaped format (Groups + Knockout and the like) can't be built by
               // the plain regenerate this modal otherwise triggers - see EOS-127 - so
               // saving into one hands off to the same stage-config wizard the row's own
-              // "Configure stages" button opens, instead of silently building a bare
+              // "Stages" button opens, instead of silently building a bare
               // bracket with no pools.
               onNeedsStageConfig={() => { const d = editing; setEditing(null); setConfiguringStages(d); }}
             />
@@ -870,23 +907,29 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
               <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => { qc.invalidateQueries({ queryKey: [fixturesPath] }); setConfiguringStages(null); }} />
             </Modal>
           )}
-        </div>
+        </>
       )}
       {editingSport && <EditSportModal ts={ts} sportName={sportName} formats={formats} onClose={() => setEditingSport(false)} />}
-    </Card>
+    </section>
   );
 }
 
 /* ----------------------------- Tab ----------------------------- */
-export function SportsTab({ eventId, canManageSport = () => true, canAddSports = true }: {
+export function SportsTab({ eventId, canManageSport = () => true, canAddSports = true, season, onSeason, onGoToVenues }: {
   eventId: string;
   /** May edit this sport's card and disciplines. A sport organiser edits only their own. */
   canManageSport?: (sportId: string) => boolean;
   /** Adding a sport to a season is the overall organiser's call. */
   canAddSports?: boolean;
+  /** The picked season, when the page above owns it (its hero counts the same season). */
+  season?: string; onSeason?: (id: string) => void;
+  /** Opens the Venue tab from the "no venues" note. */
+  onGoToVenues?: () => void;
 }) {
   const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
-  const [tournamentId, setTournamentId] = useState('');
+  const [ownSeason, setOwnSeason] = useState('');
+  const tournamentId = season ?? ownSeason;
+  const setTournamentId = onSeason ?? setOwnSeason;
   const activeTournament = tournamentId || tournaments[0]?.id || '';
 
   const { data: tsports = [] } = useApi<any[]>(activeTournament ? `/tournament-sports?tournament_id=${activeTournament}` : null);
@@ -902,42 +945,76 @@ export function SportsTab({ eventId, canManageSport = () => true, canAddSports =
   // stale cache needing a manual refresh to catch up.
   const fixturesPath = `/championships/${eventId}/fixtures`;
   const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  // Cards the organiser has flipped from the default (open for short lists, closed for long).
+  const [flipped, setFlipped] = useState<Set<string>>(new Set());
 
   if (tournaments.length === 0) {
-    return <EmptyState icon="⊟" title="Add a season first" description="Create a season in the Seasons tab, then configure its sports here." />;
+    return <EmptyState icon={<CalendarRange size={24} />} title="Add a season first" description="Create a season in the Seasons step, then configure its sports here." />;
   }
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
   const sportIcon = (id: string) => sports.find((s) => s.id === id)?.icon;
   const formatName = (id: string) => formats.find((f) => f.id === id)?.name ?? 'Format';
+  const openByDefault = tsports.length <= OPEN_UP_TO;
+  const isOpen = (id: string) => openByDefault !== flipped.has(id);
+  const allOpen = tsports.length > 0 && tsports.every((ts) => isOpen(ts.id));
+  const setAll = (open: boolean) => setFlipped(open === openByDefault ? new Set() : new Set(tsports.map((ts) => ts.id)));
+  const flip = (id: string) => setFlipped((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const q = search.trim().toLowerCase();
+  const shown = [...tsports]
+    .sort((a, b) => sportName(a.sport_id).localeCompare(sportName(b.sport_id)))
+    .filter((ts) => !q || sportName(ts.sport_id).toLowerCase().includes(q)
+      || allDraws.some((d) => d.tournament_sport_id === ts.id && (d.disciplines?.name ?? '').toLowerCase().includes(q)));
+  const disciplineCount = allDraws.filter((d) => tsports.some((ts) => ts.id === d.tournament_sport_id)).length;
+  const addBtn = canAddSports && <PillButton icon={Plus} tone="primary" onClick={() => setAdding(true)}>Add sport</PillButton>;
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm">
-          <span className="font-semibold text-slate-600 dark:text-slate-300">Season</span>
-          <Select value={activeTournament} onChange={(e) => setTournamentId(e.target.value)} className="w-56">
-            {tournaments.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-        </label>
-        {canAddSports && <Button onClick={() => setAdding(true)}>+ Add sport</Button>}
+    <div className="space-y-4">
+      {/* Toolbar: season and search on the left; counts, open/close and add on the right. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {tournaments.length > 1 && (
+          <PickList value={activeTournament} onChange={(id) => { setTournamentId(id); setFlipped(new Set()); }} ariaLabel="Season"
+            options={tournaments.map((t) => ({ value: t.id, label: t.name, icon: <CalendarRange size={14} className="text-slate-400" /> }))}
+            className={cn(PILL_PICK, 'w-full sm:w-56')} />
+        )}
+        {tsports.length > OPEN_UP_TO && (
+          <SearchInput pill value={search} onChange={setSearch} placeholder="Find a sport or discipline…" className="w-full sm:w-72" />
+        )}
+        <div className="flex w-full items-center justify-between gap-2 sm:ml-auto sm:w-auto">
+          <span className="text-xs font-semibold text-slate-400">{countOf(tsports.length, 'sport')} · {countOf(disciplineCount, 'discipline')}</span>
+          <span className="flex items-center gap-2">
+            {tsports.length > 1 && (
+              <PillButton icon={allOpen ? ChevronsDownUp : ChevronsUpDown} onClick={() => setAll(!allOpen)}>{allOpen ? 'Collapse' : 'Expand'} all</PillButton>
+            )}
+            {addBtn}
+          </span>
+        </div>
       </div>
 
+      {venues.length === 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <MapPin size={16} className="shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">No venues yet. Each discipline is played at a venue, and each match on one of its grounds or courts.</span>
+          {onGoToVenues && <PillButton onClick={onGoToVenues}>Add a venue</PillButton>}
+        </div>
+      )}
+
       {tsports.length === 0 ? (
-        <EmptyState icon={<Medal size={24} />} title="No sports yet" description="Add the sports this tournament will run - each gets its own fixture format."
-          action={canAddSports ? <Button onClick={() => setAdding(true)}>+ Add sport</Button> : undefined} />
+        <EmptyState icon={<Medal size={24} />} title="No sports yet" description="Add the sports this season will run - each gets its own fixture format." action={addBtn || undefined} />
+      ) : shown.length === 0 ? (
+        <EmptyState icon={<Medal size={24} />} title="Nothing matches" description="No sport or discipline matches that search." />
       ) : (
         <div className="grid gap-3">
-          {tsports.map((ts) => (
+          {shown.map((ts) => (
             <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues}
-              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} fixturesPath={fixturesPath} eventId={eventId}
-              canEdit={canManageSport(ts.sport_id)} />
+              draws={sortByCategory(allDraws.filter((d) => d.tournament_sport_id === ts.id), (d) => d.disciplines?.name ?? '')} drawsPath={drawsPath} fixturesPath={fixturesPath} eventId={eventId}
+              canEdit={canManageSport(ts.sport_id)} open={!!q || isOpen(ts.id)} onToggle={() => flip(ts.id)} />
           ))}
         </div>
       )}
 
       {adding && <AddSportModal eventId={eventId} tournamentId={activeTournament} existingSportIds={new Set(tsports.map((t) => t.sport_id))} onClose={() => setAdding(false)} />}
-      {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues (and the grounds or courts inside each) in the Venue tab - disciplines are assigned a venue, and each fixture a ground.</Badge>}
     </div>
   );
 }

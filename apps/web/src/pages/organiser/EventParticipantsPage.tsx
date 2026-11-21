@@ -4,7 +4,7 @@ import { ChevronDown, ChevronsDownUp, ChevronsUpDown, Users } from 'lucide-react
 import { useEvent } from './EventLayout';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
-import { Avatar, EmptyState, PILL_PICK, Pagination, SearchInput, cn } from '../../components/ui';
+import { Avatar, EmptyState, PILL_PICK, PillPagination, SearchInput, cn } from '../../components/ui';
 import { useUrlState } from '../../components/primitives';
 import { PickList } from '../../components/PickList';
 import { ParticipantsSkeleton, PillButton, SportChips, SportsDecor, TeamAvatar } from '../../features/schedule/ScheduleParts';
@@ -230,7 +230,7 @@ export function EventParticipantsPage() {
             <OrgCard key={org.orgId} org={org} open={narrowed || openOrgs.has(org.orgId)} onToggle={() => flip(setOpenOrgs, org.orgId)}
               openTeams={openTeams} onToggleTeam={(id) => flip(setOpenTeams, id)} />
           ))}
-          <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />
+          <PillPagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} noun="organisation" />
         </div>
       )}
     </div>

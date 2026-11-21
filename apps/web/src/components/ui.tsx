@@ -5,7 +5,7 @@ import type {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, CircleDashed, Info, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
 import { useDialog } from '../lib/useDialog';
 import { usePageTitle } from '../lib/pageTitle';
@@ -824,13 +824,72 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 }
 
 /* ----------------------------- EmptyState ----------------------------- */
-export function EmptyState({ icon = <CircleDashed size={32} />, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
+/** The least height a page-level empty state takes, px. */
+const EMPTY_MIN_H = 288;
+
+/** Faint pitch markings behind an empty state: halfway line, centre circle, both boxes. */
+function PitchLines() {
   return (
-    <div className="flex flex-col items-center justify-center rounded-card border border-dashed border-eos-line bg-white px-6 py-14 text-center dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-4 text-slate-300 dark:text-slate-600">{icon}</div>
-      <h3 className="font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
-      {description && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{description}</p>}
-      {action && <div className="mt-4">{action}</div>}
+    <svg aria-hidden viewBox="0 0 600 300" preserveAspectRatio="xMidYMid slice" fill="none" stroke="currentColor" strokeWidth="2"
+      className="pointer-events-none absolute inset-0 -z-10 h-full w-full text-brand-600/[0.08] dark:text-brand-300/[0.07]">
+      <rect x="12" y="12" width="576" height="276" rx="10" />
+      <line x1="300" y1="12" x2="300" y2="288" />
+      <circle cx="300" cy="150" r="52" />
+      <circle cx="300" cy="150" r="3" fill="currentColor" />
+      <rect x="12" y="75" width="78" height="150" />
+      <rect x="12" y="115" width="28" height="70" />
+      <path d="M90 118a40 40 0 0 1 0 64" />
+      <rect x="510" y="75" width="78" height="150" />
+      <rect x="560" y="115" width="28" height="70" />
+      <path d="M510 118a40 40 0 0 0 0 64" />
+    </svg>
+  );
+}
+
+/**
+ * Nothing to show yet: a card with faint pitch markings and the icon on a team-blue
+ * badge, so every empty page reads as the same product. `compact` for tight spots.
+ */
+export function EmptyState({ icon = <CircleDashed size={26} />, title, description, action, compact, bare }: {
+  icon?: ReactNode; title: string; description?: string; action?: ReactNode; compact?: boolean;
+  /** Inside another card: no border or background of its own. */
+  bare?: boolean;
+}) {
+  // A page-level empty state reaches the bottom of the screen instead of leaving it
+  // blank: heroes differ in height per page, so measure where it starts.
+  const ref = useRef<HTMLDivElement>(null);
+  const [minH, setMinH] = useState<number>();
+  const fill = !compact && !bare;
+  useEffect(() => {
+    if (!fill) return;
+    const measure = () => {
+      const el = ref.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // Room for the page's bottom padding, and the bottom nav on phones.
+      const below = window.innerWidth < 768 ? 96 : 32;
+      setMinH(Math.max(EMPTY_MIN_H, Math.round(window.innerHeight - top - below)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [fill]);
+  return (
+    <div ref={ref} style={fill && minH ? { minHeight: minH } : undefined}
+      className={cn('relative isolate flex flex-col items-center justify-center overflow-hidden px-6 text-center',
+      bare ? '' : 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900',
+      compact ? 'py-8' : 'py-14 sm:py-16')}>
+      <PitchLines />
+      {/* A soft glow under the badge, like a floodlit centre spot. */}
+      <span aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-100/50 blur-3xl dark:bg-brand-500/10" />
+      <span className={cn('grid place-items-center rounded-full border border-brand-200 bg-brand-100 text-brand-700 shadow-sm ring-4 ring-white dark:border-brand-500/30 dark:bg-slate-800 dark:text-brand-300 dark:ring-slate-900 [&_svg]:h-[45%] [&_svg]:w-[45%]',
+        compact ? 'h-11 w-11 text-lg' : 'h-14 w-14 text-xl')} aria-hidden>
+        {icon}
+      </span>
+      <h3 className={cn('font-black text-slate-900 dark:text-slate-100', compact ? 'mt-4 text-base' : 'mt-5 text-lg')}>{title}</h3>
+      {description && <p className="mt-1 max-w-md text-sm text-slate-500 dark:text-slate-400">{description}</p>}
+      {/* Buttons here take the pill shape of the other page actions, whatever variant they are. */}
+      {action && <div className="mt-5 flex flex-wrap items-center justify-center gap-2 [&_button]:!min-h-0 [&_button]:!rounded-full [&_button]:!px-4 [&_button]:!py-1.5 [&_button]:!text-[13px] [&_button]:!font-semibold [&_button]:shadow-sm">{action}</div>}
     </div>
   );
 }
@@ -879,7 +938,7 @@ export function SortDirButton({ dir, onToggle }: { dir: 'asc' | 'desc'; onToggle
 
 /* ----------------------------- SearchInput ----------------------------- */
 /** Rounded field in the chips' style; PickList triggers take the same look via PILL_PICK. */
-const PILL_FIELD = 'h-9 rounded-full border border-slate-200 bg-white text-sm font-medium text-slate-800 shadow-sm placeholder:font-normal placeholder:text-slate-400 transition hover:border-brand-300 focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:hover:border-brand-500/50';
+export const PILL_FIELD = 'h-9 rounded-full border border-slate-200 bg-white text-sm font-medium text-slate-800 shadow-sm placeholder:font-normal placeholder:text-slate-400 transition hover:border-brand-300 focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:hover:border-brand-500/50';
 export const PILL_PICK = '!h-9 !rounded-full dark:!bg-slate-900';
 
 export function SearchInput({
@@ -979,6 +1038,58 @@ export function Pagination({
   );
 }
 
+/** Page numbers to show: first, last and the current one's neighbours; null = a gap. */
+function pageList(page: number, count: number): Array<number | null> {
+  const keep = new Set([0, count - 1, page - 1, page, page + 1].filter((p) => p >= 0 && p < count));
+  const out: Array<number | null> = [];
+  [...keep].sort((a, b) => a - b).forEach((p, i, arr) => { if (i && p - arr[i - 1] > 1) out.push(null); out.push(p); });
+  return out;
+}
+
+const PAGE_PILL = 'grid h-8 min-w-8 place-items-center rounded-full px-2 text-[13px] font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400';
+
+/** Pagination in the chips' style: a count on the left, round page pills on the right. */
+export function PillPagination({ page, pageCount, total, pageSize, onPage, noun = 'item', className = '' }: {
+  page: number; pageCount: number; total: number; pageSize: number; onPage: (p: number) => void;
+  /** Singular: "organisation" reads "Showing 1-8 of 12 organisations". */
+  noun?: string; className?: string;
+}) {
+  if (total === 0) return null;
+  const from = page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
+  const arrow = (dir: -1 | 1) => {
+    const off = dir < 0 ? page <= 0 : page >= pageCount - 1;
+    const Icon = dir < 0 ? ChevronLeft : ChevronRight;
+    return (
+      <button type="button" onClick={() => onPage(page + dir)} disabled={off} aria-label={dir < 0 ? 'Previous page' : 'Next page'}
+        className={cn(PAGE_PILL, 'w-8 border border-slate-200 bg-white text-slate-600 shadow-sm hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:border-slate-200 disabled:hover:text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300')}>
+        <Icon size={15} aria-hidden />
+      </button>
+    );
+  };
+  return (
+    <nav aria-label="Pages" className={cn('flex flex-wrap items-center justify-between gap-3 pt-1', className)}>
+      <span className="text-xs font-semibold text-slate-400">
+        Showing <span className="tabular-nums text-slate-600 dark:text-slate-300">{from}-{to}</span> of <span className="tabular-nums text-slate-600 dark:text-slate-300">{total}</span> {total === 1 ? noun : `${noun}s`}
+      </span>
+      {pageCount > 1 && (
+        <div className="flex items-center gap-1">
+          {arrow(-1)}
+          {pageList(page, pageCount).map((p, i) => p === null
+            ? <span key={`gap${i}`} className="px-1 text-xs font-bold text-slate-300" aria-hidden>…</span>
+            : (
+              <button key={p} type="button" onClick={() => onPage(p)} aria-current={p === page ? 'page' : undefined} aria-label={`Page ${p + 1}`}
+                className={cn(PAGE_PILL, p === page ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500' : 'text-slate-600 hover:bg-white hover:text-brand-700 hover:shadow-sm dark:text-slate-300 dark:hover:bg-slate-800')}>
+                {p + 1}
+              </button>
+            ))}
+          {arrow(1)}
+        </div>
+      )}
+    </nav>
+  );
+}
+
 /* ----------------------------- Spinner ----------------------------- */
 export function Spinner({ label }: { label?: string }) {
   return (
@@ -990,16 +1101,31 @@ export function Spinner({ label }: { label?: string }) {
 }
 
 /* ----------------------------- Checkbox ----------------------------- */
-export function Checkbox({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: (v: boolean) => void }) {
+/**
+ * A styled checkbox: the native input stays (keyboard, screen readers, forms) but is
+ * hidden; a rounded box draws the state - blue with a tick, or a dash when some are picked.
+ */
+export function Checkbox({ checked, indeterminate, onChange, 'aria-label': ariaLabel }: {
+  checked: boolean; indeterminate?: boolean; onChange: (v: boolean) => void; 'aria-label'?: string;
+}) {
+  const mixed = !!indeterminate && !checked;
   return (
-    <input
-      type="checkbox"
-      checked={checked}
-      ref={(el) => { if (el) el.indeterminate = !!indeterminate && !checked; }}
-      onChange={(e) => onChange(e.target.checked)}
-      onClick={(e) => e.stopPropagation()}
-      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-brand-500 focus:ring-brand-400 dark:border-slate-600 dark:bg-slate-800"
-    />
+    <label className="relative inline-grid h-[18px] w-[18px] shrink-0 cursor-pointer place-items-center" onClick={(e) => e.stopPropagation()}>
+      <input
+        type="checkbox"
+        checked={checked}
+        aria-label={ariaLabel}
+        ref={(el) => { if (el) el.indeterminate = mixed; }}
+        onChange={(e) => onChange(e.target.checked)}
+        className="peer absolute inset-0 cursor-pointer opacity-0"
+      />
+      <span aria-hidden className={cn('pointer-events-none grid h-full w-full place-items-center rounded-md border-2 transition peer-focus-visible:ring-2 peer-focus-visible:ring-brand-400 peer-focus-visible:ring-offset-1',
+        checked || mixed
+          ? 'border-brand-600 bg-brand-600 text-white dark:border-brand-500 dark:bg-brand-500'
+          : 'border-slate-300 bg-white peer-hover:border-brand-400 dark:border-slate-600 dark:bg-slate-800')}>
+        {checked ? <Check size={12} strokeWidth={3.5} /> : mixed ? <span className="h-0.5 w-2 rounded-full bg-white" /> : null}
+      </span>
+    </label>
   );
 }
 

@@ -340,9 +340,7 @@ export function StandingsPage() {
             </div>
           </header>
           {isLoading ? <StandingsBoardSkeleton /> : rows.length === 0 ? (
-            <div className="p-2">
-              <EmptyState icon={<Trophy size={24} />} title="No results yet" description="Standings fill in as officials complete matches with scores." />
-            </div>
+            <EmptyState bare icon={<Trophy size={24} />} title="No results yet" description="Standings fill in as officials complete matches with scores." />
           ) : (
             <>
               <Leaderboard rows={board.rows} cols={board.cols} expanded={expanded} onToggle={toggle} breakdown={breakdown} />

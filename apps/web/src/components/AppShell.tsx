@@ -115,6 +115,8 @@ const HEADER_SELECT = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5
 const SHOW_MY_PLAN = false;
 
 /** An icon button in the sidebar footer, coloured from the sidebar's own tokens. */
+/** How long the desktop rail takes to open or close, ms (matches the grid transition). */
+const RAIL_ANIM_MS = 260;
 const SIDEBAR_ICON = 'text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]';
 
 /** The page's filters as a plain row above its content (there is no top bar to hold them). */
@@ -179,11 +181,19 @@ export function AppShell() {
   // one - collapsing it on Fixtures and finding it expanded again on Standings
   // would read as the app forgetting.
   const [railed, setRailed] = useState(sidebarRailed.get);
-  const toggleRail = () => setRailed((v) => {
-    const next = !v;
-    sidebarRailed.set(next);
-    return next;
-  });
+  const asideRef = useRef<HTMLElement>(null);
+  const toggleRail = () => {
+    setRailed((v) => {
+      const next = !v;
+      sidebarRailed.set(next);
+      return next;
+    });
+    // While the column slides (CSS), the contents fade in so labels settle, not pop.
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      Array.from(asideRef.current?.children ?? []).forEach((el) =>
+        el.animate([{ opacity: 0.15 }, { opacity: 1 }], { duration: RAIL_ANIM_MS, easing: 'ease-out' }));
+    }
+  };
 
   const signOut = () => { logout(); navigate('/', { replace: true }); };
 
@@ -274,7 +284,8 @@ export function AppShell() {
           60-110px taller than the window and its bottom row was unreachable until
           you scrolled the chrome away. */}
       <div
-        className="h-screen h-dvh overflow-hidden md:grid"
+        // The rail width slides: grid columns interpolate between the two pixel widths.
+        className="h-screen h-dvh overflow-hidden md:grid md:transition-[grid-template-columns] md:duration-[260ms] md:ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:md:transition-none"
         style={{ ['--rail-w' as string]: railed ? '72px' : '240px', gridTemplateColumns: 'var(--rail-w) 1fr' }}
       >
         {/* Mobile scrim */}
@@ -282,6 +293,7 @@ export function AppShell() {
 
         {/* Sidebar */}
         <aside
+          ref={asideRef}
           style={{ backgroundColor: 'var(--sidebar-bg)', borderColor: 'var(--sidebar-border)' }}
           className={cn(
             'fixed inset-y-0 left-0 z-drawer flex w-[240px] flex-col overflow-hidden border-r text-[var(--sidebar-fg)] transition-transform duration-200 md:static md:z-auto md:w-auto md:translate-x-0 md:transition-none',
@@ -334,7 +346,7 @@ export function AppShell() {
                   onClick={() => setSidebarOpen(false)}
                   title={it.locked ? `${it.label} - needs ${it.needs}` : it.label}
                   className={({ isActive }) => cn(
-                    'mb-0.5 flex items-center gap-2.5 rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
+                    'mb-0.5 flex items-center gap-2.5 whitespace-nowrap rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
                     railed ? 'md:justify-center md:px-0 px-2.5' : 'px-2.5',
                     isActive ? 'bg-[var(--sidebar-active)] font-semibold text-[var(--sidebar-fg-strong)]' : 'text-[var(--sidebar-fg)] hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]',
                     it.locked && 'opacity-60',
@@ -358,7 +370,7 @@ export function AppShell() {
                     onClick={() => setSidebarOpen(false)}
                     title={it.label}
                     className={({ isActive }) => cn(
-                      'mb-0.5 flex items-center gap-2.5 rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
+                      'mb-0.5 flex items-center gap-2.5 whitespace-nowrap rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
                       railed ? 'md:justify-center md:px-0 px-2.5' : 'px-2.5',
                       isActive && !eventId ? 'bg-[var(--sidebar-active)] font-semibold text-[var(--sidebar-fg-strong)]' : 'text-[var(--sidebar-fg)] hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]',
                     )}
@@ -411,7 +423,7 @@ export function AppShell() {
           <>
             <div className="fixed inset-0 z-scrim" onClick={() => setDeskMenuOpen(false)} />
             <div className="animate-dropdown fixed bottom-3 z-popover w-56 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900"
-              style={{ left: railed ? 80 : 248 }}>
+              style={{ left: railed ? 80 : 248, transition: `left ${RAIL_ANIM_MS}ms ease-out` }}>
               <div className="border-b border-slate-100 px-3 py-2 dark:border-slate-800">
                 <div className="truncate text-[13px] font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                 <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">{ctx.user.email}</div>

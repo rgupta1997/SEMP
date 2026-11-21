@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, X } from 'lucide-react';
+import { ArrowRight, Bell, Plus, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useApi } from '../lib/hooks';
@@ -10,14 +10,9 @@ import type {
   PostableEvent,
 } from '../lib/notifications';
 
-import { NotificationItem } from './NotificationItem';
+import { AnnouncementFeed, dayLabel } from './AnnouncementFeed';
 import { NotificationComposeModal } from './NotificationComposeModal';
-import {
-  Button,
-  EmptyState,
-  Spinner,
-  cn,
-} from './ui';
+import { EmptyState, cn } from './ui';
 
 // Header bell + right-side drawer. Visible to every authenticated user; the feed
 // aggregates notifications from every championship the user belongs to.
@@ -59,6 +54,8 @@ export function NotificationBell({ className, open: openProp, onOpenChange, hide
   // cast at the boundary the same way the rest of the app already
   // relies on NotificationDto's shape.
   const items = (feedData as NotificationDto[] | undefined) ?? [];
+  const newCount = items.filter((n) => n.unread).length;
+  const todayCount = items.filter((n) => dayLabel(n.created_at) === 'Today').length;
 
   // postable-championships stays a local fetch - it's app-level
   // (compose-target listing), not a notifications-package concern,
@@ -115,7 +112,7 @@ export function NotificationBell({ className, open: openProp, onOpenChange, hide
       {/* Scrim */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/50"
+          className="animate-backdrop fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         />
       )}
@@ -130,60 +127,47 @@ export function NotificationBell({ className, open: openProp, onOpenChange, hide
         )}
         aria-hidden={!open}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
-            Notifications
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {canPost && (
-              <Button
-                size="sm"
-                onClick={() => setComposing(true)}
-              >
-                + New
-              </Button>
-            )}
-
-            <button
-              onClick={() => setOpen(false)}
-              className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-              aria-label="Close"
-            >
-              <X size={16} />
-            </button>
+        {/* A soft brand tint carries the identity; no page banner in a drawer. */}
+        <div className="relative border-b border-slate-200 bg-gradient-to-b from-brand-50/80 to-white dark:border-slate-800 dark:from-brand-500/10 dark:to-slate-900">
+          <div className="flex items-start justify-between gap-2 px-4 pb-3 pt-4">
+            <div className="min-w-0">
+              <div className="text-lg font-black leading-tight text-slate-900 dark:text-slate-100">Notifications</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                {newCount > 0 && <><span className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-300"><span className="h-1.5 w-1.5 rounded-full bg-brand-500" aria-hidden />{newCount} new</span><span aria-hidden>·</span></>}
+                <span>{todayCount} today</span><span aria-hidden>·</span><span>{items.length} in all</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {canPost && (
+                <button type="button" onClick={() => setComposing(true)}
+                  className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-3 py-1 text-[13px] font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:bg-brand-500">
+                  <Plus size={14} aria-hidden />New
+                </button>
+              )}
+              <button type="button" onClick={() => setOpen(false)} aria-label="Close"
+                className="grid h-8 w-8 place-items-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                <X size={16} />
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-3">
           {isLoading ? (
-            <div className="grid place-items-center py-10">
-              <Spinner />
+            <div className="space-y-2" aria-label="Loading">
+              {Array.from({ length: 4 }, (_, i) => <div key={i} className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />)}
             </div>
           ) : items.length === 0 ? (
-            <EmptyState
-              icon={<Bell size={24} />}
-              title="No notifications"
-              description="You're all caught up."
-            />
+            <EmptyState compact icon={<Bell size={22} />} title="No notifications" description="You're all caught up." />
           ) : (
-            items.map((n) => (
-              <NotificationItem
-                key={n.id}
-                n={n}
-                compact
-              />
-            ))
+            <AnnouncementFeed rows={items} showEvent compact />
           )}
         </div>
 
-        <div className="border-t border-slate-200 bg-white px-4 py-2.5 text-center dark:border-slate-800 dark:bg-slate-900">
-          <Link
-            to="/notifications"
-            onClick={() => setOpen(false)}
-            className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
-          >
-            View all notifications
+        <div className="border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <Link to="/notifications" onClick={() => setOpen(false)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white py-2 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-brand-300 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:text-brand-300">
+            View all notifications<ArrowRight size={14} aria-hidden />
           </Link>
         </div>
       </aside>

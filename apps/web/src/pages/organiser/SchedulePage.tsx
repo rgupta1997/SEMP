@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarRange, ClipboardList, ClipboardPen, Eye, Grid3x3, Layers, LayoutList, Network, Pencil, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, Trophy, UserPlus } from 'lucide-react';
+import { CalendarRange, ClipboardList, ClipboardPen, Eye, Flag, Users, Grid3x3, Layers, LayoutList, Network, Pencil, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, Trophy, UserPlus } from 'lucide-react';
 import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -1173,6 +1173,7 @@ function buildDays(startISO?: string, endISO?: string): string[] {
 
 export function SchedulePage() {
   const { eventId, organises, canManageSport, championship } = useEvent();
+  const navigate = useNavigate();
   const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
   // Timeline status filter, driven by clicking the colour legend (empty = show all).
   const [timelineStatus, setTimelineStatus] = useState('');
@@ -1343,7 +1344,7 @@ export function SchedulePage() {
 
   if (tournamentsLoading) return <PageSkeleton kind="schedule" />;
   if (tournaments.length === 0) {
-    return <EmptyState icon="⚑" title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
+    return <EmptyState icon={<Flag size={24} />} title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
   }
 
   // The picked institute's squads, with their sport and match counts, for the squad chips.
@@ -1397,9 +1398,10 @@ export function SchedulePage() {
       ) : tsportsLoading ? (
         <div className="space-y-6"><SportSectionSkeleton /><SportSectionSkeleton cards={2} /></div>
       ) : tsports.length === 0 ? (
-        <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
+        <EmptyState icon={<Flag size={24} />} title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures."
+          action={organises ? <Button onClick={() => navigate(`/championships/${eventId}/setup?tab=sports`)}>Open setup</Button> : undefined} />
       ) : !teamHasMatch ? (
-        <EmptyState icon="⚑" title="No matches for this team" description="Pick another team, or a different sport."
+        <EmptyState icon={<Users size={24} />} title="No matches for this team" description="Pick another team, or a different sport."
           action={<Button variant="outline" onClick={() => { setTeamFilter(''); setSideFilter(''); }}>Show all teams</Button>} />
       ) : (
         <div className="space-y-6">
@@ -1409,8 +1411,12 @@ export function SchedulePage() {
             : <EventPulse title={teamFilter ? `${teamName(teamFilter)} · matches` : pickedSide ? `${pickedSide.full} · matches` : 'Event progress'} counts={pulseCounts} value={phaseFilter} onChange={setPhaseFilter} />}
           <SportChips sports={chipSports} value={pickedSports} onChange={(ids) => setSportParam(ids.join(','))} />
           {!phaseHasMatch ? (
-            <EmptyState icon="🏁" title="Nothing here right now" description="No matches are in this state. Pick another tile, or show everything."
+            <EmptyState icon={<Flag size={24} />} title="Nothing here right now" description="No matches are in this state. Pick another tile, or show everything."
               action={<Button variant="outline" onClick={() => setPhaseFilter('')}>Show all matches</Button>} />
+          ) : !allDraws.some((d) => visibleTsports.some((ts) => ts.id === d.tournament_sport_id)) ? (
+            <EmptyState icon={<Trophy size={24} />} title="No disciplines to schedule yet"
+              description="Each sport needs at least one discipline (Men's, Women's, Singles…) before its draw can be made and matches scheduled."
+              action={organises ? <Button onClick={() => navigate(`/championships/${eventId}/setup?tab=sports`)}>Add disciplines</Button> : undefined} />
           ) : visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManageSport(ts.sport_id)} teamPick={teamPick} phaseFilter={phaseFilter} onTimeline={() => setTopView('timeline')} />)}
         </div>
       )}

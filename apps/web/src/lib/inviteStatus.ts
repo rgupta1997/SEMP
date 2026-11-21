@@ -35,7 +35,7 @@ export const INVITE_BUCKET = {
 } as const;
 export type InviteBucket = (typeof INVITE_BUCKET)[keyof typeof INVITE_BUCKET];
 export type InviteFilter = InviteBucket | 'all';
-export const INVITE_FILTER_OPTIONS = [INVITE_BUCKET.PENDING, INVITE_BUCKET.APPROVED, INVITE_BUCKET.REJECTED, 'all'] as const satisfies readonly InviteFilter[];
+export const INVITE_FILTER_OPTIONS = ['all', INVITE_BUCKET.APPROVED, INVITE_BUCKET.PENDING, INVITE_BUCKET.REJECTED] as const satisfies readonly InviteFilter[];
 
 /** An invitation's status, read as the same three-bucket vocabulary an
  *  application uses - the mapping InvitePanel's `inviteBucket` used to hardcode. */

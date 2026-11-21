@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
-import { PageSkeleton, ParticipantsSkeleton } from '../../features/schedule/ScheduleParts';
+import { OverviewSkeleton, PageSkeleton, ParticipantsSkeleton, SetupSkeleton, TeamSkeleton } from '../../features/schedule/ScheduleParts';
 import { api } from '../../lib/api';
 import { archiveDaysLeft, archivePurgeDate, citiesShort } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
@@ -49,12 +49,18 @@ interface EventCtx {
   organises: boolean;
   /** May act on this catalogue sport: an overall organiser, or its sport organiser. */
   canManageSport: (sportId: string | null | undefined) => boolean;
+  /** Where Back goes - the overview draws its own header from these. */
+  back: { label: string; go: () => void };
+  /** "City · dates", and the full list for a hover. */
+  whereWhen: string; allWhere: string;
+  /** The next go-live step ("Open registration"), when this person may take it. */
+  lifecycle: { label: string; pending: boolean; advance: () => void } | null;
 }
 export const useEvent = () => useOutletContext<EventCtx>();
 
 // The legal "next" status + button label for the go-live flow.
 /** Event pages that open on their own hero, without the back / status / lifecycle row. */
-const BARE_SEGMENTS = new Set(['schedule', 'results', 'standings', 'participants']);
+const BARE_SEGMENTS = new Set(['schedule', 'results', 'standings', 'participants', 'organisers', 'setup', 'communications', 'certificates']);
 
 const NEXT_STATUS: Record<string, { to: string; label: string } | null> = {
   draft: { to: 'registration_open', label: 'Open registration' },
@@ -109,6 +115,9 @@ export function EventLayout() {
     const seg = parseEventSegment(pathname, eventId!);
     if (seg === 'schedule' || seg === 'results' || seg === 'standings') return <PageSkeleton kind={seg} />;
     if (seg === 'participants') return <ParticipantsSkeleton />;
+    if (seg === 'organisers') return <TeamSkeleton />;
+    if (seg === 'setup') return <SetupSkeleton />;
+    if (seg === '') return <OverviewSkeleton />;
     return <Spinner />;
   }
 
@@ -168,28 +177,8 @@ export function EventLayout() {
           guess. Venue and dates stay: they are what tells you which event this is
           when two have similar names. */}
       {/* Overview: the event's name as a big heading, as it always was. */}
-      {isOverview ? (
-      <div className="mb-4 flex items-start justify-between gap-3 sm:mb-5">
-        <div className="min-w-0 flex-1">
-          <BackButton onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h1 className="t-page-title min-w-0 text-slate-900 dark:text-slate-100">{championship.name}</h1>
-            <StatusBadge status={championship.status} />
-          </div>
-          <p className="t-meta mt-1" title={allWhere}>{whereWhen}</p>
-        </div>
-        {canManage && next && (
-          <Button
-            size="sm"
-            className="mt-6 shrink-0 sm:mt-0 sm:size-auto"
-            onClick={() => statusMut.mutate(next.to, { onSuccess: () => toast.success('Championship status updated'), onError: (e: any) => toast.error(e.message) })}
-            disabled={statusMut.isPending}
-          >
-            {statusMut.isPending ? 'Updating…' : next.label}
-          </Button>
-        )}
-      </div>
-      ) : bareHeader ? null : (
+      {/* The overview and the redesigned pages open on their own hero. */}
+      {isOverview || bareHeader ? null : (
       // Every other page: the NAME is in the top bar (usePageTitle), and what stays is
       // one line - back, status, where and when, and the lifecycle action.
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -235,7 +224,16 @@ export function EventLayout() {
 
       {!archivedAt && canManage && <EventPlanBanner eventId={eventId!} />}
 
-      <Outlet context={{ championship, eventId: eventId!, canManage, organises, canManageSport: manageSport } satisfies EventCtx} />
+      <Outlet context={{
+        championship, eventId: eventId!, canManage, organises, canManageSport: manageSport,
+        back: { label: backLabel, go: () => ws.leaveTo(from) },
+        whereWhen, allWhere,
+        lifecycle: canManage && next ? {
+          label: next.label,
+          pending: statusMut.isPending,
+          advance: () => statusMut.mutate(next.to, { onSuccess: () => toast.success('Championship status updated'), onError: (e: any) => toast.error(e.message) }),
+        } : null,
+      } satisfies EventCtx} />
     </div>
   );
 }

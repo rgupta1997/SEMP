@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../lib/api';
-import { MapPin, Pencil, Trash2 } from 'lucide-react';
+import { ChevronRight, MapPin, Pencil, Plus, Trash2 } from 'lucide-react';
+import { PillButton } from '../../../features/schedule/ScheduleParts';
 import { GROUND_TYPE } from '@semp/shared';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, Textarea, toast, Toggle } from '../../../components/ui';
@@ -316,36 +317,39 @@ export function VenuesTab({ eventId }: { eventId: string }) {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-500 dark:text-slate-400">The venues where this championship is played, and the grounds or courts inside each.</p>
-        <Button onClick={() => setOpen(true)}>+ Add venue</Button>
+      {/* Same toolbar as the other setup steps: counts left, add right. */}
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-slate-400">{`${venues.length} venue${venues.length === 1 ? '' : 's'}`} · {`${grounds.length} ground${grounds.length === 1 ? '' : 's'}`}</span>
+        <PillButton icon={Plus} tone="primary" onClick={() => setOpen(true)}>Add venue</PillButton>
       </div>
 
       {venues.length === 0 ? (
         <EmptyState icon={<MapPin size={24} />} title="No venues" description="Add the venue(s) where this championship is played, then the grounds or courts inside each."
-          action={<Button onClick={() => setOpen(true)}>+ Add venue</Button>} />
+          action={<PillButton icon={Plus} tone="primary" onClick={() => setOpen(true)}>Add venue</PillButton>} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {venues.map((v) => {
             const vg = grounds.filter((g) => g.venue_id === v.id);
             return (
-              <Card key={v.id} className="cursor-pointer p-4 transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => setActive(v)}>
-                <h3 className="font-semibold text-slate-900 dark:text-slate-100">{v.name}</h3>
-                {(v.address || v.city) && (
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{[v.address, v.city].filter(Boolean).join(', ')}</p>
-                )}
-                {vg.length === 0 ? (
-                  <p className="mt-3 text-xs font-medium text-amber-600 dark:text-amber-400">No grounds yet - open to add them.</p>
-                ) : (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {vg.slice(0, 8).map((g) => (
-                      <Badge key={g.id} tone={g.is_active === false ? 'slate' : 'brand'} className={g.is_active === false ? 'line-through opacity-60' : ''}>{g.name}</Badge>
-                    ))}
-                    {vg.length > 8 && <Badge tone="slate">+{vg.length - 8} more</Badge>}
-                  </div>
-                )}
-                <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">Click to manage grounds, or edit / remove the venue.</p>
-              </Card>
+              <button key={v.id} type="button" onClick={() => setActive(v)} title="Manage grounds, or edit / remove the venue"
+                className="group flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-300 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-500/50">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"><MapPin size={20} aria-hidden /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-black text-slate-900 group-hover:text-brand-700 dark:text-slate-100 dark:group-hover:text-brand-300">{v.name}</span>
+                  {(v.address || v.city) && <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{[v.address, v.city].filter(Boolean).join(', ')}</span>}
+                  {vg.length === 0 ? (
+                    <span className="mt-2 block text-xs font-semibold text-amber-600 dark:text-amber-400">No grounds yet - tap to add them</span>
+                  ) : (
+                    <span className="mt-2 flex flex-wrap gap-1.5">
+                      {vg.slice(0, 8).map((g) => (
+                        <Badge key={g.id} tone={g.is_active === false ? 'slate' : 'brand'} className={g.is_active === false ? 'line-through opacity-60' : ''}>{g.name}</Badge>
+                      ))}
+                      {vg.length > 8 && <Badge tone="slate">+{vg.length - 8} more</Badge>}
+                    </span>
+                  )}
+                </span>
+                <ChevronRight size={16} className="mt-3 shrink-0 text-slate-300 group-hover:text-brand-500 dark:text-slate-600" aria-hidden />
+              </button>
             );
           })}
         </div>
