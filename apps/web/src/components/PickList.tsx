@@ -10,6 +10,8 @@ export interface PickOption {
   /** Options sharing a group sit under one heading, in the order given. */
   group?: string;
   icon?: ReactNode;
+  /** Shown but not pickable (e.g. a format the plan does not include). */
+  disabled?: boolean;
 }
 
 /** Show a search box once the list is this long. */
@@ -83,7 +85,7 @@ export function PickList({ value, onChange, options, placeholder = 'Choose…', 
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [open]);
-  const pick = (o: PickOption) => { onChange(o.value); close(); };
+  const pick = (o: PickOption) => { if (o.disabled) return; onChange(o.value); close(); };
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(shown.length - 1, a + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
@@ -126,7 +128,8 @@ export function PickList({ value, onChange, options, placeholder = 'Choose…', 
                     {heading && <div className={cn('px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400', i === 0 ? 'pt-1.5' : 'pt-3')}>{o.group}</div>}
                     <div role="option" aria-selected={isSel} data-i={i}
                       onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o)}
-                      className={cn('flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm',
+                      aria-disabled={o.disabled || undefined}
+                      className={cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm', o.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
                         i === active ? 'bg-slate-100 dark:bg-slate-800' : '',
                         isSel ? 'font-semibold text-brand-700 dark:text-brand-300' : 'text-slate-700 dark:text-slate-200')}>
                       {o.icon && <span className="grid w-6 shrink-0 place-items-center" aria-hidden>{o.icon}</span>}

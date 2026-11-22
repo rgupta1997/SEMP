@@ -38,7 +38,8 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   router.get('/notifications', asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
-    const { take, skip } = parsePaging(req.query);
+    // The notifications clients send ?take; read it as ?limit so it isn't ignored (it was: always 50).
+    const { take, skip } = parsePaging({ ...req.query, limit: req.query.limit ?? req.query.take });
     const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
     const unreadOnly = req.query.unread === '1' || req.query.unread === 'true';
 
