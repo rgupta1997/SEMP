@@ -153,7 +153,6 @@ export const SETUP_TEMPLATE_SHEETS: SetupTemplateSheet[] = [
       { key: 'penalty_kicks', header: 'Penalty kicks', required: false, hint: 'Shoot-out kicks each; blank = none.', example: '5' },
       { key: 'third_place', header: 'Third-place match', required: false, hint: 'Yes or No.', example: 'No', allowed: ['yes', 'no'] },
       { key: 'scoring_preset', header: 'Scoring preset', required: false, hint: 'Advanced: a catalogue preset key. Blank = the sport default.', example: 'fest_2x10_ko' },
-      { key: 'fixtures', header: 'Fixtures', required: false, hint: 'Blank = from the Schedule sheet, else generated from the squads. "By hand" = no fixtures are made; the organiser adds them later (a stage whose teams are not known yet).', example: '', allowed: ['by hand'] },
     ],
   },
   {
@@ -198,7 +197,7 @@ export const SETUP_TEMPLATE_SHEETS: SetupTemplateSheet[] = [
     purpose: 'Who runs the event: organisers, officials (one per ground scores every match on it), POCs.',
     columns: [
       { key: 'name', header: 'Name', required: true, hint: '', example: 'Priya Desai' },
-      { key: 'role', header: 'Role', required: true, hint: 'Organiser, Official, POC, Org owner or Org admin. A new host organisation needs at least one Org owner.', example: 'Organiser', allowed: ['organiser', 'organizer', 'official', 'referee', 'poc', 'org owner', 'org admin'] },
+      { key: 'role', header: 'Role', required: true, hint: 'Organiser, Official, POC, Org owner or Org admin.', example: 'Organiser', allowed: ['organiser', 'organizer', 'official', 'referee', 'poc', 'org owner', 'org admin'] },
       { key: 'mobile', header: 'Mobile', required: false, hint: 'Without mobile or email they get a placeholder.', example: '9876522222' },
       { key: 'email', header: 'Email', required: false, hint: 'An existing Sportagon login is found by its email.', example: 'priya.desai@acme.com' },
       { key: 'ground', header: 'Ground', required: false, hint: 'Officials: the ground they score.', example: 'Turf 1' },
@@ -213,7 +212,7 @@ export const SETUP_TEMPLATE_SHEETS: SetupTemplateSheet[] = [
       { key: 'sport', header: 'Sport', required: false, hint: 'Needed only when there is more than one draw.', example: 'Football' },
       { key: 'discipline', header: 'Discipline', required: false, hint: '', example: 'Mixed' },
       { key: 'date', header: 'Date', required: true, aliases: ['Day'], hint: 'YYYY-MM-DD, or "Day 1" with Day dates set on Event.', example: '2026-10-17' },
-      { key: 'kickoff', header: 'Kickoff', required: false, aliases: ['Kickoff (IST)', 'Start', 'Time'], hint: '24h 14:20 or 2:20 PM, local time. Blank = time not fixed yet: the match is made without one.', example: '09:00' },
+      { key: 'kickoff', header: 'Kickoff', required: true, aliases: ['Kickoff (IST)', 'Start', 'Time'], hint: '24h 14:20 or 2:20 PM, local time.', example: '09:00' },
       { key: 'end', header: 'End', required: false, aliases: ['Match End', 'Finish'], hint: 'Blank = the draw\'s match minutes.', example: '09:25' },
       { key: 'ground', header: 'Ground', required: true, aliases: ['Turf', 'Court', 'Pitch'], hint: 'One of the Grounds on Event.', example: 'Turf 1' },
       { key: 'side_1', header: 'Side 1', required: true, aliases: ['Team 1', 'Home'], hint: 'A squad name, or "Winner of <Match ID>".', example: 'Acme Strikers' },

@@ -118,8 +118,6 @@ export interface SetupDrawSpec {
   squadMin: number;
   squadMax: number;
   thirdPlace: boolean;
-  /** "Fixtures: By hand" on the sheet: no fixtures are made for this draw. */
-  fixturesByHand?: boolean;
   /**
    * An org-saved scoring format built from a catalogue preset. Absent = the sport's
    * default. `matchMinutes` is the WHOLE match (two halves of 10 = 20): the console
@@ -153,7 +151,7 @@ export interface SetupMatchRowSpec {
   /** The client's own match id ("B1-R55-1"), kept on the fixture as "Match <id>". */
   matchId: string;
   date: string;      // YYYY-MM-DD, local
-  kickoff: string;   // HH:MM, 24h local; '' = time not set yet (the match is made without one)
+  kickoff: string;   // HH:MM, 24h local
   minutes: number;   // kickoff to final whistle
   groundKey: string;
   home: SetupMatchSide;

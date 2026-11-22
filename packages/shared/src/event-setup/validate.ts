@@ -102,7 +102,6 @@ interface DrawRec {
   minutes?: number;
   minGiven: boolean;
   maxGiven: boolean;
-  byHand?: boolean;
 }
 
 interface SquadRec {
@@ -171,8 +170,6 @@ interface SchedRow {
   shapeOk: boolean;
   /** A repeat of an earlier row's match id: never written to the blueprint. */
   dupId?: boolean;
-  /** Kickoff left blank: made with its date and ground, the time set later. */
-  timeTba?: boolean;
 }
 
 // ===========================================================================
@@ -688,14 +685,11 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
   // STAFF
   // ======================================================================
   const staff: SetupStaffSpec[] = [];
-  /** The Staff sheet had a header and all its columns, so its rows were read (an empty one reports itself). */
-  let staffRead = false;
   if (located.Staff && steps.staff === 'skip') {
     info('sheet_ignored', 'Staff and roles is set to Skip, so the Staff sheet was not read and nobody is given a role.', { sheet: 'Staff' });
   } else if (located.Staff) {
     const t = readTable(located.Staff.grid, templateSheet('Staff'), type, sink);
     if (!t.missing.length) {
-      staffRead = t.headerRow > 0;
       const seen = new Map<string, number>();
       for (const r of t.rows) {
         const nm = tidy(r.get('name'));
@@ -804,13 +798,6 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
         if (draws.length) error('missing_value', `Schedule row ${r.row} has no Sport or Discipline, and there is more than one draw (${drawsText()}). Fill in which draw the match is in.`, { sheet: 'Schedule', row: r.row, column: 'Sport' });
         continue;
       }
-      if (draw.byHand) {
-        if (!refused.has(draw)) {
-          refused.add(draw);
-          error('schedule_for_by_hand', `The Schedule sheet has matches for ${draw.label}, whose Fixtures is "By hand" on Draws, so no fixtures are made for it. Delete those Schedule rows, or clear Fixtures on Draws.`, { sheet: 'Schedule', row: r.row, column: 'Sport' });
-        }
-        continue;
-      }
       if (draw.spec.format !== 'Knockout') {
         if (!refused.has(draw)) {
           refused.add(draw);
@@ -857,19 +844,15 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
           warn('match_outside_event', `Schedule row ${r.row} (${sr.matchId}) is on ${sr.date}, outside the event's dates (${ev.start} to ${ev.end}). Check the date, or the Start and End dates on the Event sheet.`, { sheet: 'Schedule', row: r.row, column: 'Date' });
         }
       }
-      // times. A blank kickoff (TBA) is allowed: the match is made with its ground and
-      // the date in its note, and shows as "needs a time" until the organiser sets one.
+      // times
       const kickRaw = r.get('kickoff');
-      if (!kickRaw) sr.timeTba = true;
+      if (!kickRaw) error('missing_value', `Schedule row ${r.row} has no kickoff time. Write it as 14:20 or 2:20 PM.`, { sheet: 'Schedule', row: r.row, column: 'Kickoff' });
       else {
         sr.start = parseTime(kickRaw) ?? undefined;
-        if (sr.start === undefined) error('bad_time', `Schedule row ${r.row}: kickoff "${kickRaw}" is not a time. Write it as 14:20 or 2:20 PM, or leave it blank if the time is not fixed yet.`, { sheet: 'Schedule', row: r.row, column: 'Kickoff' });
+        if (sr.start === undefined) error('bad_time', `Schedule row ${r.row}: kickoff "${kickRaw}" is not a time. Write it as 14:20 or 2:20 PM.`, { sheet: 'Schedule', row: r.row, column: 'Kickoff' });
       }
       const endRaw = r.get('end');
-      if (endRaw && sr.timeTba) {
-        info('end_ignored', `Schedule row ${r.row}: there is no kickoff, so End (${endRaw}) is not used.`, { sheet: 'Schedule', row: r.row, column: 'End' });
-        if (draw.minutes) sr.minutes = draw.minutes;
-      } else if (endRaw) {
+      if (endRaw) {
         const end = parseTime(endRaw);
         if (end === null) error('bad_time', `Schedule row ${r.row}: end "${endRaw}" is not a time. Write it as 14:45 or 2:45 PM, or leave it blank to use the draw's match minutes.`, { sheet: 'Schedule', row: r.row, column: 'End' });
         else if (sr.start !== undefined) {
@@ -877,7 +860,7 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
           else sr.minutes = end - sr.start;
         }
       } else if (draw.minutes) sr.minutes = draw.minutes;
-      else if (!sr.timeTba) {
+      else {
         error('no_match_length', `Schedule row ${r.row} has no End time, and ${draw.label} has no Match minutes on Draws, so the match length is unknown. Fill in End here, or Match minutes on Draws.`, { sheet: 'Schedule', row: r.row, column: 'End' });
       }
       // ground
@@ -917,11 +900,6 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
         }
       });
       schedRows.push(sr);
-    }
-
-    const tba = schedRows.filter((x) => x.timeTba);
-    if (tba.length) {
-      info('time_to_be_set', `${tba.length} ${tba.length === 1 ? 'match has' : 'matches have'} no kickoff (${list(tba.map((x) => x.matchId), 6)}). ${tba.length === 1 ? 'It is' : 'They are'} set up with ${tba.length === 1 ? 'its' : 'their'} ground and the date in the match note; set the times in the schedule later.`, { sheet: 'Schedule', column: 'Kickoff' });
     }
 
     // ---- per draw: the bracket --------------------------------------------
@@ -1076,11 +1054,7 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
 
   // ---- draws with no schedule are generated ---------------------------------
   if (steps.fixtures !== 'skip' && !scheduleUnreadable) {
-    const byHand = draws.filter((d) => d.byHand);
-    if (byHand.length) {
-      info('fixtures_by_hand', `${list(byHand.map((d) => d.label))}: Fixtures is "By hand", so no fixtures are made; the organiser adds them in the schedule later.`, { sheet: 'Draws', column: 'Fixtures' });
-    }
-    const generated = draws.filter((d) => !scheduledDraws.has(d) && !d.byHand);
+    const generated = draws.filter((d) => !scheduledDraws.has(d));
     for (const d of generated) fixtures.push({ kind: 'generate', drawKey: d.spec.key });
     if (generated.length) {
       info('fixtures_generated', `${list(generated.map((d) => d.label))}: no schedule on the sheet, so ${generated.length === 1 ? 'its' : 'their'} fixtures are generated from the squads, in sheet order, when the event is set up.`, located.Schedule ? { sheet: 'Schedule' } : {});
@@ -1094,17 +1068,6 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
   for (const s of SETUP_STEPS) {
     if (steps[s.key] === 'existing') {
       info('step_existing', `${stepLabel(s, type)} is set to "Already exists": it is looked up on Sportagon by ${s.foundBy}, and the run stops if it is not there.`);
-    }
-  }
-  // A host organisation made from the sheet needs an owner: the organisers only run
-  // the event, and nobody else could manage its settings, members or billing.
-  if (steps.org === 'sheet') {
-    const ifThere = 'If it is already on Sportagon with an owner, set Host organisation to "Already exists" instead.';
-    const owners = staff.filter((s) => s.orgRole === 'owner');
-    if (steps.staff === 'skip') {
-      error('org_needs_owner', `${ev.hostOrg || 'The host organisation'} is set up from the sheet, so it needs an owner, but Staff and roles is set to Skip. Set Staff and roles to From sheet and add a row with Role "Org owner". ${ifThere}`, { sheet: 'Staff' });
-    } else if (staffRead && !owners.length) {
-      error('no_org_owner', `Nobody on the Staff sheet is an Org owner, so ${ev.hostOrg || 'the host organisation'} would be set up with no owner. Add a row with Role "Org owner" for the person who runs it. ${ifThere}`, { sheet: 'Staff', column: 'Role' });
     }
   }
   if (steps.people === 'skip' && steps.squads !== 'skip') {
@@ -1433,11 +1396,6 @@ function readDraws(
       spec, row: r.row, label, sportNorm: looseKey(sport), discNorm: looseKey(disc),
       minGiven: squadMin !== undefined, maxGiven: squadMax !== undefined,
     };
-    const fixRaw = r.get('fixtures');
-    if (fixRaw) {
-      if (looseKey(fixRaw) === 'byhand' || looseKey(fixRaw) === 'manual') { rec.byHand = true; spec.fixturesByHand = true; }
-      else error('bad_value', `${label} (Draws row ${r.row}): Fixtures is "${fixRaw}". Write "By hand", or leave it blank.`, at('Fixtures'));
-    }
     if (minutes !== undefined) rec.minutes = minutes;
     seen.set(norm, rec);
     draws.push(rec);
@@ -1517,7 +1475,7 @@ function absMinutes(date: string, minutes: number): number {
 }
 
 function isComplete(x: SchedRow): boolean {
-  return !!x.matchId && x.date !== undefined && (x.timeTba || (x.start !== undefined && x.minutes !== undefined))
+  return !!x.matchId && x.date !== undefined && x.start !== undefined && x.minutes !== undefined
     && !!x.ground && x.sides.every((s) => s !== null);
 }
 
