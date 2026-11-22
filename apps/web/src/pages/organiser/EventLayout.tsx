@@ -60,7 +60,7 @@ export const useEvent = () => useOutletContext<EventCtx>();
 
 // The legal "next" status + button label for the go-live flow.
 /** Event pages that open on their own hero, without the back / status / lifecycle row. */
-const BARE_SEGMENTS = new Set(['schedule', 'results', 'standings', 'participants', 'organisers', 'setup', 'communications', 'certificates']);
+const BARE_SEGMENTS = new Set(['schedule', 'results', 'standings', 'participants', 'organisers', 'setup', 'communications', 'certificates', 'awards']);
 
 const NEXT_STATUS: Record<string, { to: string; label: string } | null> = {
   draft: { to: 'registration_open', label: 'Open registration' },

@@ -117,7 +117,7 @@ export function PickList({ value, onChange, options, placeholder = 'Choose…', 
               </div>
             )}
             <ul ref={list} role="listbox" tabIndex={-1} onKeyDown={onKey} aria-label={ariaLabel} className="min-h-0 flex-1 overflow-y-auto p-1 outline-none">
-              {shown.length === 0 && <li className="px-3 py-6 text-center text-xs text-slate-400">No matches</li>}
+              {shown.length === 0 && <li className="px-3 py-6 text-center text-xs text-slate-400">{needle ? 'No matches' : 'Nothing to choose yet'}</li>}
               {shown.map((o, i) => {
                 const heading = o.group && o.group !== shown[i - 1]?.group;
                 const isSel = o.value === value;

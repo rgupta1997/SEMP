@@ -889,7 +889,7 @@ export function EmptyState({ icon = <CircleDashed size={26} />, title, descripti
       <h3 className={cn('font-black text-slate-900 dark:text-slate-100', compact ? 'mt-4 text-base' : 'mt-5 text-lg')}>{title}</h3>
       {description && <p className="mt-1 max-w-md text-sm text-slate-500 dark:text-slate-400">{description}</p>}
       {/* Buttons here take the pill shape of the other page actions, whatever variant they are. */}
-      {action && <div className="mt-5 flex flex-wrap items-center justify-center gap-2 [&_button]:!min-h-0 [&_button]:!rounded-full [&_button]:!px-4 [&_button]:!py-1.5 [&_button]:!text-[13px] [&_button]:!font-semibold [&_button]:shadow-sm">{action}</div>}
+      {action && <div className="mt-5 flex flex-wrap items-center justify-center gap-2 [&_button]:inline-flex [&_button]:items-center [&_button]:gap-1.5 [&_button]:whitespace-nowrap [&_button]:!min-h-0 [&_button]:!rounded-full [&_button]:!px-4 [&_button]:!py-1.5 [&_button]:!text-[13px] [&_button]:!font-semibold [&_button]:shadow-sm">{action}</div>}
     </div>
   );
 }
