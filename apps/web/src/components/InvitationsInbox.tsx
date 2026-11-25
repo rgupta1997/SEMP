@@ -1,6 +1,7 @@
+import { Check, MailOpen, MapPin, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useApi, useApiMutation, fmtDateRange } from '../lib/hooks';
-import { Button, Card, toast } from './ui';
+import { cn, toast } from './ui';
 
 interface Invite {
   id: string;
@@ -14,24 +15,28 @@ interface Invite {
   venue: string | null;
 }
 
+/** The event's start as a small navy date stub: "NOV" over "17". */
+function DateStub({ iso }: { iso: string }) {
+  const d = new Date(iso);
+  return (
+    <span className="flex w-12 shrink-0 flex-col items-center rounded-xl bg-[#0a1630] py-1.5 text-center text-white">
+      <span className="text-[9px] font-black uppercase tracking-[0.16em] text-[var(--accent)]">{d.toLocaleDateString(undefined, { month: 'short' })}</span>
+      <span className="text-lg font-black leading-none tabular-nums">{d.getDate()}</span>
+    </span>
+  );
+}
+
 // Shown to an owner/admin of an organization that's been invited to a championship.
 // Accepting auto-approves that org for the championship. Pass `organizationId` to scope
-// the inbox to a single org (e.g. on that org's manage view); omit it for the global
-// "all your invitations" inbox.
+// the inbox to a single org (e.g. on that org's manage view); omit it for all your invitations.
 export function InvitationsInbox({ organizationId, className = '' }: { organizationId?: string; className?: string } = {}) {
   const { data: allInvites = [] } = useApi<Invite[]>('/me/invitations');
   const invites = organizationId ? allInvites.filter((i) => i.organization_id === organizationId) : allInvites;
 
   const accept = useApiMutation(
     (id: string) => api('POST', `/invitations/${id}/accept`),
-    // Auto-approved on accept (the host invited them) - refresh enrollments too so the
-    // org immediately shows as approved and can enter teams. Also refresh the bell -
-    // accepting fires an 'enrollment_approved' notification (audience: everyone
-    // related to the championship) in the same request, and the accepting org owner
-    // immediately qualifies as a POC, so the badge needs a nudge or it sits stale.
-    // '/organizations' also refreshes this org's own Events page (its All/Participating
-    // tabs) and dashboard queue - both read a now-stale enrollment otherwise, and
-    // previously only cleared on a manual refresh or a round trip to another page.
+    // Accepting auto-approves the org, so enrollments, the bell (it fires 'enrollment_approved')
+    // and the org's own Events page all read stale data without a refresh.
     ['/me/invitations', '/championships/mine', '/me/enrollments', 'notifications', '/organizations'],
   );
   const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations', '/organizations']);
@@ -39,34 +44,42 @@ export function InvitationsInbox({ organizationId, className = '' }: { organizat
   if (invites.length === 0) return null;
 
   return (
-    <Card className={`border-brand-200 bg-brand-50/50 p-4 dark:border-brand-500/30 dark:bg-brand-500/5 ${className}`}>
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-lg">✉️</span>
-        <h2 className="font-semibold text-slate-900 dark:text-slate-100">You're invited{invites.length > 1 ? ` · ${invites.length}` : ''}</h2>
+    <section className={cn('overflow-hidden rounded-2xl border border-[var(--accent-deep)]/30 bg-white shadow-sm dark:bg-slate-900', className)}>
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-[var(--accent)]/10 px-4 py-3 dark:border-slate-800">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-slate-950"><MailOpen size={16} aria-hidden /></span>
+          <span className="min-w-0">
+            <span className="block text-sm font-black text-slate-900 dark:text-slate-100">You're invited</span>
+            <span className="block truncate text-xs text-slate-500 dark:text-slate-400">Accept to enter your organisation's teams</span>
+          </span>
+        </span>
+        <span className="rounded-full bg-[var(--accent-deep)] px-2.5 py-0.5 text-xs font-black tabular-nums text-white">{invites.length}</span>
       </div>
-      <div className="space-y-2">
-        {invites.map((inv) => (
-          <div key={inv.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3 dark:bg-slate-900">
-            <div className="min-w-0">
-              <div className="font-semibold text-slate-900 dark:text-slate-100">{inv.championship_name}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Invited as <span className="font-medium">{inv.org_name}</span> · {inv.venue || 'Venue TBD'} · {fmtDateRange(inv.start_date, inv.end_date)}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" disabled={accept.isPending}
-                onClick={() => accept.mutate(inv.id,
-                  { onSuccess: () => toast.success('Joined the championship', 'You can enter teams now.'), onError: (e: any) => toast.error(e.message) })}>
-                Accept
-              </Button>
-              <Button size="sm" variant="ghost" disabled={decline.isPending}
-                onClick={() => decline.mutate(inv.id, { onSuccess: () => toast.success('Invitation declined'), onError: (e: any) => toast.error(e.message) })}>
-                Decline
-              </Button>
+      {invites.map((inv) => (
+        <div key={inv.id} className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-4 py-3 first-of-type:border-t-0 dark:border-slate-800">
+          <DateStub iso={inv.start_date} />
+          <div className="min-w-0 flex-[1_1_220px]">
+            <div className="truncate text-sm font-black text-slate-900 dark:text-slate-100">{inv.championship_name}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">as {inv.org_name}</span>
+              <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden />{inv.venue || 'Venue to be confirmed'}</span>
+              <span>{fmtDateRange(inv.start_date, inv.end_date)}</span>
             </div>
           </div>
-        ))}
-      </div>
-    </Card>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" disabled={decline.isPending}
+              onClick={() => decline.mutate(inv.id, { onSuccess: () => toast.success('Invitation declined'), onError: (e: any) => toast.error(e.message) })}
+              className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:text-rose-600 hover:ring-rose-200 disabled:opacity-60 dark:text-slate-300 dark:ring-slate-700">
+              <X size={14} aria-hidden />Decline
+            </button>
+            <button type="button" disabled={accept.isPending}
+              onClick={() => accept.mutate(inv.id, { onSuccess: () => toast.success('Joined the championship', 'You can enter teams now.'), onError: (e: any) => toast.error(e.message) })}
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)] px-4 py-1.5 text-[13px] font-black text-slate-950 shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-105 disabled:opacity-60">
+              <Check size={14} aria-hidden />Accept
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }

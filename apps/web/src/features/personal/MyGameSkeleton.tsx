@@ -50,9 +50,9 @@ export function MyGameSkeleton() {
             <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-800/40"><Bar className="h-3 w-36" /><Bar className="h-8 w-28 bg-[var(--accent)]/30" /></div>
           </div>
         </div>
-        <div className="grid grid-cols-6 border-t border-white/10 bg-black/25 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto]">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className={cn('space-y-2 border-r border-white/10 px-3 py-3 sm:px-4 lg:col-span-1', i < 3 ? 'col-span-2' : 'col-span-3 border-t lg:border-t-0')}>
+        <div className="grid grid-cols-6 border-t border-white/10 bg-black/25 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className={cn('col-span-2 space-y-2 border-r border-white/10 px-3 py-3 sm:px-4 lg:col-span-1', i >= 3 && 'border-t lg:border-t-0')}>
               <DarkBar className="h-5 w-10" /><DarkBar className="h-2 w-14" />
             </div>
           ))}

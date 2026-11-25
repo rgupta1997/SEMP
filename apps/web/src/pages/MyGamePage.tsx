@@ -7,8 +7,9 @@ import { useAuth } from '../lib/auth';
 import { usePageTitle } from '../lib/pageTitle';
 import { EmptyState, cn } from '../components/ui';
 import { LiveDot, TeamAvatar } from '../features/schedule/ScheduleParts';
-import { HEX_CLIP, PILL_GHOST, PILL_TEAL, TEAL_TILE } from '../features/personal/styles';
+import { PILL_GHOST, PILL_TEAL, TEAL_TILE } from '../features/personal/styles';
 import { MyGameSkeleton } from '../features/personal/MyGameSkeleton';
+import { PlayerBadge } from '../features/personal/PlayerBadge';
 import { DayTile, MatchMeta, RESULT_TAG, Scoreline, score } from '../features/personal/MatchParts';
 
 // My Game - personal landing screen (PG-10, F-040..F-044). A new account lands here with
@@ -162,27 +163,32 @@ function FixtureCard({ next, iconOf, onOpen, emptyAction }: {
   );
 }
 
+/** A one-line placeholder for a card in the "right now" row, short enough not to stretch its neighbour. */
+function SlimEmpty({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
+  return (
+    <div className="flex flex-1 items-center gap-3 px-4 py-5">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800" aria-hidden><Icon size={18} /></span>
+      <span className="min-w-0">
+        <span className="block text-sm font-black text-slate-800 dark:text-slate-100">{title}</span>
+        <span className="block text-xs text-slate-500 dark:text-slate-400">{text}</span>
+      </span>
+    </div>
+  );
+}
+
 /** The player's season along the foot of the hero, like a broadcast stat band. */
 function SeasonBand({ stats, winRate, teams, form }: { stats: Home['stats']; winRate: number | null; teams: number; form: Match[] }) {
-  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  // "across 2 events" beside each count, once there is something to count.
-  const across = (n: number) => (n && stats.events ? plural(stats.events, 'event') : undefined);
-  const figures: Array<[string, ReactNode, string?]> = [
-    ['Games', stats.games, across(stats.games)], ['Wins', stats.wins, across(stats.wins)],
-    ['Win rate', winRate == null ? '-' : `${winRate}%`], ['Sports', stats.sports, across(stats.sports)], ['Teams', teams, across(teams)],
+  const figures: Array<[string, ReactNode]> = [
+    ['Events', stats.events], ['Games', stats.games], ['Wins', stats.wins],
+    ['Win rate', winRate == null ? '-' : `${winRate}%`], ['Sports', stats.sports], ['Teams', teams],
   ];
   return (
-    // Phones: three figures over two (6-col grid); desktop: one row of five, then form.
-    <div className="relative grid grid-cols-6 border-t border-white/10 bg-black/25 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto]">
-      {figures.map(([k, v, sub], i) => (
-        <div key={k} className={cn('min-w-0 border-r border-white/10 px-3 py-3 sm:px-4 lg:col-span-1 lg:px-3 xl:px-5', i < 3 ? 'col-span-2' : 'col-span-3 border-t lg:border-t-0')}>
-          {/* The note rides beside the number, so the band keeps one height. */}
-          <div className="flex min-w-0 items-baseline gap-1.5">
-            <span className="text-xl font-black tabular-nums sm:text-2xl">{v}</span>
-            {/* "across" drops where the cells are narrowest: small phones and the 1024-1279 row of five. */}
-            {sub && <span className="min-w-0 truncate text-[11px] font-semibold text-[var(--accent)]" title={`across ${sub}`}><span className="max-[374px]:hidden lg:max-xl:hidden">across </span>{sub}</span>}
-          </div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">{k}</div>
+    // Phones: two rows of three (6-col grid); desktop: one row of six, then form.
+    <div className="relative grid grid-cols-6 border-t border-white/10 bg-black/25 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
+      {figures.map(([k, v], i) => (
+        <div key={k} className={cn('col-span-2 min-w-0 border-r border-white/10 px-3 py-3 sm:px-4 lg:col-span-1 lg:px-3 xl:px-5', i >= 3 && 'border-t lg:border-t-0')}>
+          <div className="text-xl font-black tabular-nums sm:text-2xl">{v}</div>
+          <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">{k}</div>
         </div>
       ))}
       <div className="col-span-6 flex items-center gap-2 border-t border-white/10 px-3 py-2.5 sm:px-4 lg:col-span-1 lg:border-t-0 xl:px-5">
@@ -192,23 +198,6 @@ function SeasonBand({ stats, winRate, teams, form }: { stats: Home['stats']; win
         )) : <span className="text-xs text-white/45">No results yet</span>}
       </div>
     </div>
-  );
-}
-
-/** The player in the Sportagon hexagon: photo or initials, teal edge, shirt number on the rim. */
-function PlayerBadge({ name, photo, number }: { name: string; photo?: string | null; number?: number | null }) {
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
-  return (
-    <span aria-hidden className="relative shrink-0 drop-shadow-[0_8px_14px_rgba(0,0,0,.45)] max-sm:hidden">
-      <span className="block h-[64px] w-[56px] bg-gradient-to-b from-[var(--accent)] to-[var(--accent-deep)] p-[2.5px]" style={{ clipPath: HEX_CLIP }}>
-        <span className="grid h-full w-full place-items-center overflow-hidden bg-gradient-to-br from-[#2453b8] to-[#1a3d8f] text-lg font-black tracking-tight text-white" style={{ clipPath: HEX_CLIP }}>
-          {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials}
-        </span>
-      </span>
-      {number != null && (
-        <span className="absolute -bottom-1 -right-1.5 rounded-full bg-white px-1 py-px text-[10px] font-black tabular-nums text-[#0a1630] shadow ring-2 ring-[#0a1630]">#{number}</span>
-      )}
-    </span>
   );
 }
 
@@ -270,7 +259,7 @@ export function MyGamePage() {
         <HeroTexture />
         <div className="relative grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center">
           <div className="flex min-w-0 items-center gap-4">
-            <PlayerBadge name={ctx?.user?.name ?? ''} photo={ctx?.user?.avatar_url}
+            <PlayerBadge className="max-sm:hidden" name={ctx?.user?.name ?? ''} photo={ctx?.user?.avatar_url}
               number={ctx?.user?.jersey_number} />
             <div className="min-w-0">
               <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">Matchday · {today}</div>
@@ -292,10 +281,21 @@ export function MyGamePage() {
         <SeasonBand stats={d.stats} winRate={winRate} teams={d.teams.length} form={form} />
       </section>
 
-      {/* Right now: only when something is live or waiting on you. */}
+      {/* Right now: only when something is live or waiting on you. Both cards show
+          together, an empty one with a placeholder, so the row never sits half blank. */}
       {(d.live.length > 0 || d.pending.length > 0) && (
         <div className="grid gap-4 lg:grid-cols-2">
-          {d.live.length > 0 && (
+          {d.live.length === 0 ? (
+            <section className={cn(CARD, 'flex flex-col')}>
+              <div className={CARD_HEAD}>
+                <span className="flex items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-200 px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">Live</span>
+                  <span className="text-sm font-black text-slate-900 dark:text-slate-100">Playing now</span>
+                </span>
+              </div>
+              <SlimEmpty icon={CalendarClock} title="Nothing live right now" text="Your squads' matches show here the moment one kicks off." />
+            </section>
+          ) : (
             <section className={cn(CARD, 'border-rose-200 dark:border-rose-500/30')}>
               <div className={cn(CARD_HEAD, 'bg-rose-50/60 dark:bg-rose-500/5')}>
                 <span className="flex items-center gap-2.5">
@@ -321,7 +321,12 @@ export function MyGamePage() {
               <MoreToggle total={d.live.length} expanded={!!expanded.live} onToggle={() => toggle('live')} />
             </section>
           )}
-          {d.pending.length > 0 && (
+          {d.pending.length === 0 ? (
+            <section className={cn(CARD, 'flex flex-col')}>
+              <div className={CARD_HEAD}><CardTitle icon={ClipboardPen} tone="amber" title="Waiting on you" sub="Matches you are scoring" /></div>
+              <SlimEmpty icon={ClipboardPen} title="You're all caught up" text="Scorecards you need to finish or get locked show up here." />
+            </section>
+          ) : (
             <section className={cn(CARD, 'border-amber-200 dark:border-amber-500/30')}>
               <div className={cn(CARD_HEAD, 'bg-amber-50/60 dark:bg-amber-500/5')}>
                 <CardTitle icon={ClipboardPen} tone="amber" title="Waiting on you" sub="Matches you are scoring" />
@@ -402,7 +407,7 @@ export function MyGamePage() {
             ) : (
               <>
                 <ul>
-                  {(expanded.teams ? d.teams : d.teams.slice(0, ROW_LIMIT)).map((t) => {
+                  {d.teams.slice(0, ROW_LIMIT).map((t) => {
                     const captain = t.role === 'captain';
                     return (
                       <li key={t.id} className="flex items-center gap-3 border-t border-slate-100 px-4 py-2.5 first:border-t-0 dark:border-slate-800">
@@ -424,7 +429,12 @@ export function MyGamePage() {
                     );
                   })}
                 </ul>
-                <MoreToggle total={d.teams.length} expanded={!!expanded.teams} onToggle={() => toggle('teams')} />
+                {/* The full list lives on the profile's Teams tab; expanding here stretched both columns. */}
+                {d.teams.length > ROW_LIMIT && (
+                  <Link to="/profile?tab=teams" className="block w-full border-t border-slate-100 py-2.5 text-center text-[13px] font-semibold text-[var(--accent-deep)] transition hover:bg-slate-50 dark:border-slate-800 dark:text-[var(--accent)] dark:hover:bg-slate-800/40">
+                    View all ({d.teams.length})
+                  </Link>
+                )}
               </>
             )}
           </section>
