@@ -10,14 +10,8 @@ import { EmptyState, StatusBadge, cn } from '../../components/ui';
 import { SharePublicLink } from '../../components/SharePublicLink';
 import { useOrganiserOnboarding } from '../../lib/onboarding';
 import { LiveDot, SportsDecor, countPhases } from '../../features/schedule/ScheduleParts';
+import { eventStatusLook } from '../../lib/eventStatus';
 
-/** How each lifecycle status reads in the hero. */
-const STATUS_LOOK: Record<string, { label: string; dot: string; solid: string }> = {
-  draft: { label: 'Draft', dot: 'bg-amber-900/60', solid: 'bg-amber-400 text-amber-950 shadow-amber-900/20' },
-  registration_open: { label: 'Registration open', dot: 'bg-sky-900/60', solid: 'bg-sky-300 text-sky-950 shadow-sky-900/20' },
-  ongoing: { label: 'Live', dot: 'bg-white', solid: 'bg-rose-500 text-white shadow-rose-900/30' },
-  completed: { label: 'Completed', dot: 'bg-emerald-950/60', solid: 'bg-emerald-400 text-emerald-950 shadow-emerald-900/20' },
-};
 const CARD = 'overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const CARD_HEAD = 'flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800';
 const PILL_LINK = 'inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-brand-300 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:text-brand-300';
@@ -94,7 +88,7 @@ export function EventDashboard() {
   const phases = countPhases(fixtures);
   const total = phases.live + phases.upcoming + phases.unscheduled + phases.done;
   const entrants = (championship.entry?.entrant_label_plural ?? 'Organisations').toLowerCase();
-  const look = STATUS_LOOK[championship.status] ?? { label: championship.status, dot: 'bg-slate-500', solid: 'bg-white text-slate-800' };
+  const look = eventStatusLook(championship.status);
 
   // What wants a decision now, most urgent first.
   const attention: Array<{ icon: LucideIcon; tone: 'rose' | 'amber' | 'brand'; label: string; to?: string; onClick?: () => void; cta: string }> = [];

@@ -281,7 +281,7 @@ export function ViewTabs<T extends string>({ value, onChange, options, size = 'm
         const Icon = o.icon;
         return (
           <button key={o.value} type="button" role="tab" aria-selected={active} onClick={() => onChange(o.value)}
-            className={cn('flex items-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
+            className={cn('flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
               size === 'sm' ? 'px-3 py-1 text-[13px]' : 'px-4 py-1.5 text-sm',
               active ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500' : 'text-slate-600 hover:bg-slate-50 hover:text-brand-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-brand-300')}>
             {Icon && <Icon size={size === 'sm' ? 14 : 15} aria-hidden />}{o.label}{o.badge}
@@ -345,7 +345,11 @@ export function TeamChips({ sides, value, onChange }: { sides: TeamSide[]; value
 }
 
 /** Sports as multi-select filter chips with live dots; "All sports" first clears them. */
-export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2, showCounts = true }: {
+export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2, showCounts = true, wrap = false, allTotal: allTotalOverride }: {
+  /** Flow onto several rows (inside a filter panel) instead of one scrolling row. */
+  wrap?: boolean;
+  /** The All chip's count when summing per-sport counts would double-count (an event runs several sports). */
+  allTotal?: number;
   /** Off where a match count means nothing (Standings). */
   showCounts?: boolean;
   sports: Array<{ id: string; name: string; icon?: string | null; live: number; total: number }>;
@@ -358,7 +362,7 @@ export function SportChips({ sports, value, onChange, allLabel = 'All sports', a
 }) {
   if (sports.length < minItems) return null;
   const allLive = sports.reduce((n, s) => n + s.live, 0);
-  const allTotal = sports.reduce((n, s) => n + s.total, 0);
+  const allTotal = allTotalOverride ?? sports.reduce((n, s) => n + s.total, 0);
   const chip = (id: string, label: string, icon: ReactNode, live: number, total: number) => {
     const active = id ? value.includes(id) : value.length === 0;
     // A sport toggles in or out of the set; "All sports" empties it.
@@ -378,7 +382,7 @@ export function SportChips({ sports, value, onChange, allLabel = 'All sports', a
     );
   };
   return (
-    <nav aria-label={label} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+    <nav aria-label={label} className={cn('flex gap-2', wrap ? 'flex-wrap' : '-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]')}>
       {chip('', allLabel, allIcon, allLive, allTotal)}
       {sports.map((s) => chip(s.id, s.name, s.icon || '🏅', s.live, s.total))}
     </nav>

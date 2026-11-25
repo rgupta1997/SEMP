@@ -14,6 +14,8 @@ export interface AuthUser {
   email: string;
   phone?: string | null;
   avatar_url?: string | null;
+  /** The shirt number set on the profile; null when the player has not set one. */
+  jersey_number?: number | null;
   is_super_admin: boolean;
   organization_id: string | null;
   // Set on admin-provisioned logins; forces a password reset on first sign-in.

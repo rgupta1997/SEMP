@@ -877,7 +877,8 @@ export function EmptyState({ icon = <CircleDashed size={26} />, title, descripti
   return (
     <div ref={ref} style={fill && minH ? { minHeight: minH } : undefined}
       className={cn('relative isolate flex flex-col items-center justify-center overflow-hidden px-6 text-center',
-      bare ? '' : 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900',
+      // Inside a card, it grows to the card's height (when the card is a flex column).
+      bare ? 'flex-1' : 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900',
       compact ? 'py-8' : 'py-14 sm:py-16')}>
       <PitchLines />
       {/* A soft glow under the badge, like a floodlit centre spot. */}
@@ -1049,10 +1050,12 @@ function pageList(page: number, count: number): Array<number | null> {
 const PAGE_PILL = 'grid h-8 min-w-8 place-items-center rounded-full px-2 text-[13px] font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400';
 
 /** Pagination in the chips' style: a count on the left, round page pills on the right. */
-export function PillPagination({ page, pageCount, total, pageSize, onPage, noun = 'item', className = '' }: {
+export function PillPagination({ page, pageCount, total, pageSize, onPage, noun = 'item', plural, className = '' }: {
   page: number; pageCount: number; total: number; pageSize: number; onPage: (p: number) => void;
   /** Singular: "organisation" reads "Showing 1-8 of 12 organisations". */
   noun?: string; className?: string;
+  /** When adding an s is wrong: "matches". */
+  plural?: string;
 }) {
   if (total === 0) return null;
   const from = page * pageSize + 1;
@@ -1070,7 +1073,7 @@ export function PillPagination({ page, pageCount, total, pageSize, onPage, noun 
   return (
     <nav aria-label="Pages" className={cn('flex flex-wrap items-center justify-between gap-3 pt-1', className)}>
       <span className="text-xs font-semibold text-slate-400">
-        Showing <span className="tabular-nums text-slate-600 dark:text-slate-300">{from}-{to}</span> of <span className="tabular-nums text-slate-600 dark:text-slate-300">{total}</span> {total === 1 ? noun : `${noun}s`}
+        Showing <span className="tabular-nums text-slate-600 dark:text-slate-300">{from}-{to}</span> of <span className="tabular-nums text-slate-600 dark:text-slate-300">{total}</span> {total === 1 ? noun : plural ?? `${noun}s`}
       </span>
       {pageCount > 1 && (
         <div className="flex items-center gap-1">

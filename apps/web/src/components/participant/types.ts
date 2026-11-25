@@ -33,8 +33,8 @@ export interface MatchSummary {
   sport: string | null;
   discipline: string | null;
   championship: { id: string; name: string; slug: string } | null;
-  my_team: { id: string; name: string } | null;
-  opponent: { id: string; name: string; organization: string | null } | null;
+  my_team: { id: string; name: string; short_name?: string | null } | null;
+  opponent: { id: string; name: string; short_name?: string | null; organization: string | null } | null;
   my_score: number | null;
   opp_score: number | null;
   /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */

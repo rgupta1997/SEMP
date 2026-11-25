@@ -101,9 +101,10 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>, userId: string) {
     sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
-    my_team: mine ? { id: mine.id, name: mine.name } : null,
+    // short_name lets the crests read "HTU", not initials of "HTU Football".
+    my_team: mine ? { id: mine.id, name: mine.name, short_name: mine.short_name ?? null } : null,
     opponent: opp
-      ? { id: opp.id, name: opp.name, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null }
+      ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null }
       : null,
     my_score: myScore ?? null,
     opp_score: oppScore ?? null,
@@ -153,7 +154,9 @@ interface Settlement { pens: Shootout | null; settled: KhoSettlement | null }
 
 // MatchSummary built from a `matchSelect` row. `shootouts` comes from loadShootouts.
 function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Settlement>) {
-  const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
+  // On neither side (a match you only score), keep the fixture's own home-first order.
+  const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id)
+    || !(f.away_team_id != null && myTeamIds.has(f.away_team_id));
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
   const ts = f.tournament_disciplines?.tournament_sports;
@@ -315,8 +318,10 @@ export function makeMeRouter(prisma: Prisma): Router {
         team_id: true,
         is_active: true,
         left_at: true,
+        role: true,
         teams: {
           select: {
+            name: true,
             sports: { select: { id: true, name: true, icon: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
             // Archived events leave My Game's championship cards along with the event.
@@ -734,10 +739,10 @@ export function makeMeRouter(prisma: Prisma): Router {
       })),
       teams: memberships.map((m) => ({
         id: m.team_id,
-        name: (m.teams as any)?.name ?? null,
+        name: m.teams?.name ?? null,
         organization: m.teams?.organizations?.short_name ?? m.teams?.organizations?.name ?? null,
         sport: m.teams?.sports?.name ?? null,
-        role: (m as any).role ?? 'player',
+        role: m.role ?? 'player',
       })),
       stats: { games: allPlayed, events: eventIds.size, sports: sportIds.size, wins: allWins },
     });
@@ -863,8 +868,8 @@ export function makeMeRouter(prisma: Prisma): Router {
         discipline: f.tournament_disciplines?.disciplines?.name ?? null,
         tournament: ts?.tournaments?.name ?? null,
         championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
-        my_team: { id: mine.id, name: mine.name, organization: mine.organizations?.name ?? null },
-        opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.name ?? null } : null,
+        my_team: { id: mine.id, name: mine.name, short_name: mine.short_name ?? null, organization: mine.organizations?.name ?? null },
+        opponent: opp ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.name ?? null } : null,
         my_role: myMember?.role ?? null,
         former_member: formerMember,
         jersey_number: myMember?.jersey_number ?? null,
