@@ -78,6 +78,7 @@ export function OrganizationsPage() {
 
       {creating && (
         <InstitutionFormModal
+          accent="teal"
           onClose={() => setCreating(false)}
           onSubmit={async (body) => {
             const org = await api('POST', '/organizations', body);

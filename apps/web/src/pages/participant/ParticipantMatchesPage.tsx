@@ -54,7 +54,8 @@ export function ParticipantMatchesPage() {
   // One fetch; event, sport and status narrow it here, so every count agrees with the list.
   const { data, isLoading } = useApi<MatchesResponse>(`/me/matches${orgId ? `?organization_id=${orgId}` : ''}`);
   const all = useMemo(() => data?.matches ?? [], [data]);
-  const [view, setView] = useState<View>('all');
+  // ?view=live opens on a tab - My Game's 'View all live' lands here.
+  const [view, setView] = useState<View>(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view') as View : 'all'));
   const [eventId, setEventId] = useState('');
   const [sports, setSports] = useState<string[]>([]);
   const [sportsOpen, setSportsOpen] = useState(false);

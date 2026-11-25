@@ -20,6 +20,10 @@ export interface EventCardData {
   team_count: number;
   match_count: number;
   win_count: number;
+  /** Finished matches, and how they went. Optional so an older API still type-checks. */
+  played_count?: number;
+  draw_count?: number;
+  loss_count?: number;
   sports: string[];
 }
 

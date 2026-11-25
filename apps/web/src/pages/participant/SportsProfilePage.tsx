@@ -8,7 +8,7 @@ import { useApi } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { usePageTitle } from '../../lib/pageTitle';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Button, EmptyState, Field, Input, Modal, PillPagination, Textarea, cn, toast } from '../../components/ui';
+import { EmptyState, Modal, PILL_PICK, PillPagination, cn, toast } from '../../components/ui';
 import { PickList } from '../../components/PickList';
 import { SheetPreview, openDoc, downloadCertificate } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
@@ -129,7 +129,7 @@ function SportsTab() {
       <p className="text-sm text-slate-500 dark:text-slate-400">Taken from the squads you belong to.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {shown.map(([sport, v]) => (
-          <div key={sport} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div key={sport} className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#0a1630] text-2xl" aria-hidden>{v.icon || iconOf(sport)}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-base font-black text-slate-900 dark:text-slate-100">{sport}</span>
@@ -163,7 +163,7 @@ function TeamsTab() {
           const captain = t.membership_role === 'captain';
           const events = (t.team_entries ?? []).map((e) => e.championships?.name).filter(Boolean) as string[];
           return (
-            <div key={t.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div key={t.id} className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <span className="relative shrink-0">
                 <TeamAvatar name={t.name} short={t.organizations?.short_name} />
                 <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-white text-[11px] shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700" aria-hidden>{t.sports?.icon || iconOf(t.sports?.name)}</span>
@@ -290,6 +290,7 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
   const [jersey, setJersey] = useState(id.controlled.jersey_number?.toString() ?? '');
   const [busy, setBusy] = useState(false);
   const { data: sportsList } = useApi<Array<{ id: string; name: string }>>('/sports');
+  const iconOf = useSportIcon();
 
   const availableSports = (sportsList ?? []).filter((s) => !sports.includes(s.name));
 
@@ -346,65 +347,116 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
     } finally { setBusy(false); }
   };
 
+  const handleStatus = handleError ? { text: handleError, cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200' }
+    : shouldCheckHandle && checkingHandle ? { text: 'Checking…', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' }
+      : handleTaken ? { text: 'Taken', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200' }
+        : shouldCheckHandle && availability?.available ? { text: 'Available', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200' }
+          : null;
+
   return (
     <Modal
       title="Edit profile"
       onClose={onClose}
+      bannerTone={PERSONAL_NAVY}
+      banner={<ModalBanner icon={Pencil} title="Edit profile" sub="What you say about yourself. Your verified record stays as it is." />}
       footer={(
-        <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
-        </>
+        <div className="flex w-full justify-end gap-2">
+          <button type="button" onClick={onClose} className={MODAL_GHOST}>Cancel</button>
+          <button type="button" onClick={save} disabled={busy} className={MODAL_PRIMARY}><Check size={14} aria-hidden />{busy ? 'Saving…' : 'Save'}</button>
+        </div>
       )}
     >
-      <div className="grid gap-4">
-        <Field label="Tagline" hint={`${tagline.length}/160 - a short line shown under your name.`}>
-          <Textarea value={tagline} onChange={(e) => setTagline(e.target.value.slice(0, 160))} rows={2}
-            placeholder="e.g. Right-arm off-spinner · Badminton doubles specialist" />
-        </Field>
+      <div className="space-y-6">
+        <ModalSection icon={Pencil} title="About you">
+          <div className="relative">
+            <textarea value={tagline} onChange={(e) => setTagline(e.target.value.slice(0, 160))} rows={2} aria-label="Tagline"
+              placeholder="e.g. Right-arm off-spinner · Badminton doubles specialist"
+              className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pb-6 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[var(--accent-deep)] focus:outline-none focus:ring-[3px] focus:ring-[var(--accent)]/25 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
+            <span className="pointer-events-none absolute bottom-2 right-3 text-[11px] font-semibold tabular-nums text-slate-400">{tagline.length}/160</span>
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">A short line shown under your name.</p>
+        </ModalSection>
 
-        {/* A plain div, not <Field>: a <label> around several controls routes stray clicks to the first chip's remove button. */}
-        <div className="mb-4 block">
-          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Preferred sports</span>
+        <ModalSection icon={Medal} title="Your sport">
+          {/* A plain div, not <Field>: a <label> around several controls routes stray clicks to the first chip's remove button. */}
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Preferred sports</span>
+            <span className="text-[11px] font-semibold tabular-nums text-slate-400">{sports.length}/12</span>
+          </div>
           {sports.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {sports.map((s) => (
-                <span key={s} className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-2.5 py-1 text-xs font-bold text-[var(--accent-deep)] dark:text-[var(--accent)]">
-                  {s}
-                  <button type="button" onClick={() => removeSport(s)} aria-label={`Remove ${s}`} className="rounded-full p-0.5 hover:bg-[var(--accent)]/25"><X size={11} aria-hidden /></button>
+                <span key={s} className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 py-1 pl-2.5 pr-1 text-xs font-bold text-[var(--accent-deep)] dark:text-[var(--accent)]">
+                  <span aria-hidden>{iconOf(s)}</span>{s}
+                  <button type="button" onClick={() => removeSport(s)} aria-label={`Remove ${s}`} className="grid h-5 w-5 place-items-center rounded-full hover:bg-[var(--accent)]/25"><X size={11} aria-hidden /></button>
                 </span>
               ))}
             </div>
           )}
           {sports.length < 12 && (
             // Value stays empty, so choosing one always reads as "added another", not "now selected".
-            <PickList value="" onChange={addSport} placeholder="Add a sport…" searchPlaceholder="Search sports" ariaLabel="Add a sport"
-              options={availableSports.map((s) => ({ value: s.name, label: s.name }))} />
+            <div className="mt-2"><PickList value="" onChange={addSport} placeholder="Add a sport…" searchPlaceholder="Search sports" ariaLabel="Add a sport" className={PILL_PICK}
+              options={availableSports.map((s) => ({ value: s.name, label: s.name }))} /></div>
           )}
-          <span className="mt-1 block text-xs text-slate-400 dark:text-slate-500">{sports.length}/12 - sports you play, shown on your public profile.</span>
-        </div>
 
-        <Field label="Jersey number" hint="Your usual number. Scorers see it on the team sheet and can change it for a single match.">
-          <Input type="number" inputMode="numeric" min={JERSEY_NUMBER_MIN} max={JERSEY_NUMBER_MAX} value={jersey}
-            onChange={(e) => { setJersey(e.target.value); setHandleError(null); }}
-            placeholder="e.g. 10" className="w-28" style={{ fontFamily: MONO }} data-qa="profile-jersey" />
-        </Field>
+          <div className="mt-4 flex items-start gap-3">
+            {/* The shirt: a navy box with the number on it, as on the profile badge. */}
+            <label className="flex h-10 w-16 shrink-0 items-center justify-center gap-0.5 rounded-lg bg-[#0a1630] px-1.5 text-white ring-2 ring-transparent focus-within:ring-[var(--accent)]">
+              <span className="text-sm font-black text-[var(--accent)]">#</span>
+              <input type="number" inputMode="numeric" min={JERSEY_NUMBER_MIN} max={JERSEY_NUMBER_MAX} value={jersey} aria-label="Jersey number"
+                onChange={(e) => { setJersey(e.target.value); setHandleError(null); }} placeholder="10" data-qa="profile-jersey"
+                className="w-8 bg-transparent text-center text-base font-black tabular-nums text-white placeholder:text-white/30 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
+            </label>
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-slate-600 dark:text-slate-300">Shirt number</span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400">Your usual number. Scorers see it on the team sheet and can change it for a single match.</span>
+            </span>
+          </div>
+        </ModalSection>
 
-        <Field label="Handle" hint="Becomes your public profile address: /p/your-handle - needed before your profile can go public.">
-          <Input value={handleValue} onChange={(e) => { setHandleValue(e.target.value); setHandleError(null); }}
-            placeholder="your-handle" maxLength={40} style={{ fontFamily: MONO }} />
-          {handleError ? (
-            <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">{handleError}</span>
-          ) : shouldCheckHandle && checkingHandle ? (
-            <span className="mt-1 block text-xs text-slate-400 dark:text-slate-500">Checking availability…</span>
-          ) : handleTaken ? (
-            <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">That handle is already taken</span>
-          ) : shouldCheckHandle && availability?.available ? (
-            <span className="mt-1 block text-xs text-emerald-600 dark:text-emerald-400">Available</span>
-          ) : null}
-        </Field>
+        <ModalSection icon={AtSign} title="Public address">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-[var(--accent-deep)] focus-within:ring-[3px] focus-within:ring-[var(--accent)]/25 dark:border-slate-700 dark:bg-slate-900">
+            <span className="text-sm font-bold text-slate-400" style={{ fontFamily: MONO }}>@</span>
+            <input value={handleValue} onChange={(e) => { setHandleValue(e.target.value); setHandleError(null); }} aria-label="Handle"
+              placeholder="your-handle" maxLength={40} style={{ fontFamily: MONO }}
+              className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none dark:text-slate-100" />
+            {handleStatus && <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider', handleStatus.cls)}>{handleStatus.text}</span>}
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+            Your profile's address: <span style={{ fontFamily: MONO }}>/p/{handleValue.trim().toLowerCase() || 'your-handle'}</span>. Needed before it can go public.
+          </p>
+        </ModalSection>
       </div>
     </Modal>
+  );
+}
+
+// Pill buttons for the profile's pop-ups, in the personal workspace's teal.
+const MODAL_PRIMARY = 'inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-black text-slate-950 shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-105 disabled:opacity-60';
+const MODAL_GHOST = 'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold text-slate-600 ring-1 ring-slate-200 transition hover:text-slate-900 dark:text-slate-300 dark:ring-slate-700';
+
+/** The navy header of the profile's pop-ups: teal icon tile, title, one line under it. */
+function ModalBanner({ icon: Icon, title, sub }: { icon: typeof Users; title: string; sub: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-3 text-white">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-slate-950"><Icon size={17} aria-hidden /></span>
+      <span className="min-w-0">
+        <span className="block text-base font-black leading-tight">{title}</span>
+        <span className="block text-xs text-white/60">{sub}</span>
+      </span>
+    </span>
+  );
+}
+
+/** A titled group inside a pop-up: teal icon tile, then its fields. */
+function ModalSection({ icon: Icon, title, children }: { icon: typeof Users; title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2.5 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        <span className={cn('grid h-6 w-6 place-items-center rounded-md', TEAL_TILE)}><Icon size={13} aria-hidden /></span>{title}
+      </h3>
+      {children}
+    </section>
   );
 }
 
@@ -412,19 +464,19 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
 function SwitchRow({ on, label, hint, onClick, disabled }: { on: boolean; label: string; hint: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={onClick} disabled={disabled}
-      className="flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:hover:bg-slate-800/40">
+      className="flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-3 text-left transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:hover:bg-slate-800/40">
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-bold text-slate-800 dark:text-slate-100">{label}</span>
         <span className="block text-xs text-slate-500 dark:text-slate-400">{hint}</span>
       </span>
-      <span aria-hidden className={cn('relative h-5 w-9 shrink-0 rounded-full transition', on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700')}>
-        <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', on ? 'left-[18px]' : 'left-0.5')} />
+      <span aria-hidden className={cn('relative h-6 w-11 shrink-0 rounded-full transition', on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700')}>
+        <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all', on ? 'left-[22px]' : 'left-0.5')} />
       </span>
     </button>
   );
 }
 
-/** Who can see the profile: the two switches, the public link, and the rule verified records live by. */
+/** Who can see the profile: where it stands, the two switches, the link, and the rule verified records live by. */
 function VisibilityModal({ id, onClose, onChanged, onEdit, onShare, copied }: {
   id: Identity; onClose: () => void; onChanged: () => void; onEdit: () => void; onShare: () => void; copied: boolean;
 }) {
@@ -450,9 +502,25 @@ function VisibilityModal({ id, onClose, onChanged, onEdit, onShare, copied }: {
       toast.error(e?.message ?? 'Could not change that');
     } finally { setStatsBusy(false); }
   };
+  const isPublic = !!id.controlled.handle && id.privacy.public_profile;
   return (
-    <Modal title="Profile visibility" onClose={onClose} footer={<Button onClick={onClose}>Done</Button>}>
+    <Modal title="Profile visibility" onClose={onClose} bannerTone={PERSONAL_NAVY}
+      banner={<ModalBanner icon={isPublic ? Globe : Lock} title="Profile visibility" sub="Choose who can see your profile." />}
+      footer={<div className="flex w-full justify-end"><button type="button" onClick={onClose} className={MODAL_PRIMARY}>Done</button></div>}>
       <div className="space-y-3">
+        {/* Where it stands, before what can be changed. */}
+        <div className={cn('flex items-center gap-3 rounded-2xl px-4 py-3', isPublic ? 'bg-emerald-50 dark:bg-emerald-500/10' : 'bg-[#0a1630] text-white')}>
+          <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-full', isPublic ? 'bg-emerald-500 text-white' : 'bg-white/10 text-[var(--accent)]')}>
+            {isPublic ? <Globe size={18} aria-hidden /> : <Lock size={18} aria-hidden />}
+          </span>
+          <span className="min-w-0">
+            <span className={cn('block text-sm font-black', isPublic ? 'text-emerald-800 dark:text-emerald-200' : 'text-white')}>{isPublic ? 'Your profile is public' : 'Your profile is private'}</span>
+            <span className={cn('block text-xs', isPublic ? 'text-emerald-900/70 dark:text-emerald-200/70' : 'text-white/60')}>
+              {isPublic ? 'Anyone with your link can see it.' : id.controlled.handle ? 'Only you can see it.' : 'Pick a handle to give it a public address.'}
+            </span>
+          </span>
+        </div>
+
         {id.controlled.handle ? (
           <>
             <SwitchRow on={id.privacy.public_profile} disabled={busy} onClick={togglePublic} label="Public profile"
@@ -470,16 +538,13 @@ function VisibilityModal({ id, onClose, onChanged, onEdit, onShare, copied }: {
           </>
         ) : (
           // A handle is the profile's address, so it has to exist before the profile can go public.
-          <div className="rounded-xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
-            Your profile is private. Pick a handle to give it a public address.
-            <button type="button" onClick={() => { onClose(); onEdit(); }} className="mt-2 flex items-center gap-1 text-[13px] font-bold text-[var(--accent-deep)] dark:text-[var(--accent)]"><AtSign size={14} aria-hidden />Set a handle</button>
-          </div>
+          <button type="button" onClick={() => { onClose(); onEdit(); }} className={cn(MODAL_PRIMARY, 'w-full justify-center')}><AtSign size={15} aria-hidden />Set a handle</button>
         )}
         {/* F-026's trust anchor, as a fact rather than a switch. The server says whether it holds. */}
         {id.privacy.verified_records_visible && (
-          <div className="flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900/80 dark:bg-emerald-500/10 dark:text-emerald-200/80">
+          <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600 dark:bg-slate-800/40 dark:text-slate-300">
             <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
-            <span><span className="font-black text-emerald-800 dark:text-emerald-200">Verified records always show.</span> Results written by a locked scorecard cannot be edited or hidden - not by you, and not by the institution that issued them.</span>
+            <span><span className="font-black text-slate-800 dark:text-slate-100">Verified records always show.</span> Results written by a locked scorecard cannot be edited or hidden - not by you, and not by the institution that issued them.</span>
           </div>
         )}
       </div>
@@ -504,14 +569,14 @@ function AthleteBanner({ id, onEdit, onShare, copied, onChanged }: { id: Identit
 
       <div className="relative flex items-start justify-between gap-2 px-5 pt-4 sm:px-7">
         <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
-          Sportagon athlete <span className="text-white/35">·</span> <span style={{ fontFamily: MONO }}>{id.sportagon_id ?? 'ID pending'}</span>
+          <span className="max-sm:hidden">Sportagon athlete <span className="text-white/35">·</span> </span><span style={{ fontFamily: MONO }}>{id.sportagon_id ?? 'ID pending'}</span>
         </span>
         <div className="flex flex-wrap justify-end gap-2">
           {/* One button for who can see the profile; the switches live in its pop-up. */}
           <button type="button" onClick={() => setVisOpen(true)} title="Manage who can see your profile"
             className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ring-1 transition',
               isPublic ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-400/40 hover:bg-emerald-400/25' : 'bg-white/10 text-white/85 ring-white/20 hover:bg-white/20')}>
-            {isPublic ? <Globe size={13} aria-hidden /> : <Lock size={13} aria-hidden />}{isPublic ? 'Public' : 'Private'}
+            {isPublic ? <Globe size={13} aria-hidden /> : <Lock size={13} aria-hidden />}<span className="max-sm:sr-only">{isPublic ? 'Public' : 'Private'}</span>
           </button>
           <button type="button" onClick={onEdit} aria-label="Edit profile"
             className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold ring-1 ring-white/20 transition hover:bg-white/20">
@@ -519,12 +584,12 @@ function AthleteBanner({ id, onEdit, onShare, copied, onChanged }: { id: Identit
           </button>
           {id.public_url ? (
             <button type="button" onClick={onShare} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-black text-slate-950 transition hover:brightness-105">
-              {copied ? <Check size={13} aria-hidden /> : <Share2 size={13} aria-hidden />}{copied ? 'Copied' : 'Share'}
+              {copied ? <Check size={13} aria-hidden /> : <Share2 size={13} aria-hidden />}<span className="max-sm:sr-only">{copied ? 'Copied' : 'Share'}</span>
             </button>
           ) : !id.controlled.handle && (
             // A handle is a URL, so it has to exist before the profile can go public.
             <button type="button" onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-black text-slate-950 transition hover:brightness-105">
-              <AtSign size={13} aria-hidden />Set a handle
+              <AtSign size={13} aria-hidden /><span className="max-sm:sr-only">Set a handle</span>
             </button>
           )}
         </div>
@@ -538,7 +603,8 @@ function AthleteBanner({ id, onEdit, onShare, copied, onChanged }: { id: Identit
           {first && <div className="text-lg font-light leading-none text-white/80 sm:text-xl">{first}</div>}
           <h1 className="mt-1 break-words text-3xl font-black uppercase leading-[0.95] tracking-tight sm:text-4xl">{last}</h1>
           {id.controlled.tagline
-            ? <p className="mt-1.5 max-w-xl text-sm text-white/75">{id.controlled.tagline}</p>
+            // The player's own words, set as a pull-quote so they read as theirs, not as a caption.
+            ? <p className="mt-2.5 max-w-xl border-l-2 border-[var(--accent)] pl-3 text-[15px] font-medium italic leading-snug text-white/90">{id.controlled.tagline}</p>
             : <button type="button" onClick={onEdit} className="mt-1.5 text-xs text-white/40 hover:text-[var(--accent)]">+ Add a tagline</button>}
           {/* The bio line: shirt, handle, contact, visibility. */}
           <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/60">
@@ -549,7 +615,7 @@ function AthleteBanner({ id, onEdit, onShare, copied, onChanged }: { id: Identit
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {id.officiates && <span className={cn(CHIP, 'bg-amber-400 text-amber-950')}>Official</span>}
             {id.controlled.preferred_sports.map((s) => (
-              <span key={s} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold ring-1 ring-white/15"><span aria-hidden>{iconOf(s)}</span>{s}</span>
+              <span key={s} title={s} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold ring-1 ring-white/15 max-sm:px-2"><span aria-hidden>{iconOf(s)}</span><span className="max-sm:sr-only">{s}</span></span>
             ))}
             {id.controlled.preferred_sports.length === 0 && <button type="button" onClick={onEdit} className="rounded-full border border-dashed border-white/25 px-2.5 py-1 text-xs text-white/50 hover:text-white">+ Add your sports</button>}
           </div>
@@ -596,15 +662,22 @@ function StatsRibbon({ stats }: { stats?: CareerStatsData }) {
     ['Events', stats?.total_events ?? 0, 'text-slate-900 dark:text-slate-100'], ['Matches', stats?.total_matches ?? 0, 'text-slate-900 dark:text-slate-100'],
   ];
   return (
-    <section className="relative z-10 mx-3 -mt-8 flex flex-wrap items-center gap-x-2 gap-y-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-xl shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900 sm:mx-7 sm:-mt-8 sm:flex-nowrap">
-      <span className="flex shrink-0 items-center gap-2"><WinRing w={w} d={d} l={l} /><span className="text-[10px] font-bold uppercase leading-tight tracking-[0.14em] text-slate-400">Win<br />rate</span></span>
-      <div className="grid min-w-0 flex-1 grid-cols-3 gap-y-3 sm:grid-cols-5">
-        {figures.map(([k, v, tone]) => (
-          <div key={k} className="min-w-0 border-l border-slate-100 px-3 dark:border-slate-800 sm:px-5">
-            <div className={cn('text-xl font-black leading-tight tabular-nums', tone)}>{v}</div>
-            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{k}</div>
-          </div>
-        ))}
+    <section className="relative z-10 mx-3 -mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900 sm:mx-7">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="flex shrink-0 items-center gap-2"><WinRing w={w} d={d} l={l} /><span className="text-[10px] font-bold uppercase leading-tight tracking-[0.14em] text-slate-400 max-sm:hidden">Win<br />rate</span></span>
+        {/* Phones: one even row of W / D / L; events and matches drop to the line below. */}
+        <div className="grid min-w-0 flex-1 grid-cols-3 sm:grid-cols-5">
+          {figures.map(([k, v, tone], i) => (
+            <div key={k} className={cn('min-w-0 border-l border-slate-100 px-2.5 dark:border-slate-800 sm:px-5', i >= 3 && 'max-sm:hidden')}>
+              <div className={cn('text-xl font-black leading-tight tabular-nums', tone)}>{v}</div>
+              <div className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">{k}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-3 py-1.5 text-[11px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-800/30 dark:text-slate-400 sm:hidden">
+        <span>Win rate</span>
+        <span><b className="text-slate-800 dark:text-slate-100">{stats?.total_events ?? 0}</b> events · <b className="text-slate-800 dark:text-slate-100">{stats?.total_matches ?? 0}</b> matches</span>
       </div>
     </section>
   );
@@ -614,21 +687,20 @@ const TAB_ICON: Record<TabKey, typeof Users> = {
   overview: LayoutGrid, sports: Medal, teams: Users, timeline: History, statistics: BarChart3, achievements: Trophy, certificates: Award,
 };
 
-/** The profile's sections as a vertical menu (a chip row on phones). */
+/** The profile's sections as one horizontal tab row, scrolling sideways on phones. */
 function SectionNav({ active, onPick, isLocked }: { active: TabKey; onPick: (k: TabKey) => void; isLocked: (t: typeof TABS[number]) => boolean }) {
   return (
-    <nav aria-label="Profile sections" className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] lg:flex-col lg:gap-0.5 lg:overflow-visible lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:p-2 lg:pb-2 dark:lg:border-slate-800 dark:lg:bg-slate-900 [&::-webkit-scrollbar]:hidden">
+    <nav aria-label="Profile sections" className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm [scrollbar-width:none] dark:border-slate-800 dark:bg-slate-900 [&::-webkit-scrollbar]:hidden">
       {TABS.map((t) => {
         const Icon = TAB_ICON[t.key];
         const on = t.key === active;
         return (
           <button key={t.key} type="button" onClick={() => onPick(t.key)} aria-current={on ? 'page' : undefined}
-            className={cn('group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-3 py-2 text-sm font-semibold transition lg:rounded-xl',
-              on ? 'bg-[#0a1630] text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:text-slate-900 lg:bg-transparent lg:ring-0 lg:hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700 dark:lg:hover:bg-slate-800/50')}>
-            <span className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-lg max-lg:hidden', on ? 'bg-[var(--accent)] text-slate-950' : TEAL_TILE)}><Icon size={15} aria-hidden /></span>
-            <span className="flex-1 text-left">{t.label}</span>
+            className={cn('group flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-sm font-semibold transition',
+              on ? 'bg-[#0a1630] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50')}>
+            <span className={cn('grid h-6 w-6 shrink-0 place-items-center rounded-md', on ? 'bg-[var(--accent)] text-slate-950' : TEAL_TILE)}><Icon size={14} aria-hidden /></span>
+            <span>{t.label}</span>
             {isLocked(t) && <Lock size={12} className="opacity-60" aria-hidden />}
-            {on && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] max-lg:hidden" />}
           </button>
         );
       })}
@@ -655,8 +727,8 @@ function PageSkeleton() {
         </div>
       </div>
       <div className="relative mx-8 -mt-14 h-28 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900" />
-      <div className="mt-6 grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <span className="block h-80 animate-pulse rounded-2xl border border-slate-200 bg-white max-lg:h-10 dark:border-slate-800 dark:bg-slate-900" />
+      <div className="mt-6 space-y-5">
+        <span className="block h-12 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />
         <span className="block h-80 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />
       </div>
     </div>
@@ -690,14 +762,11 @@ export function SportsProfilePage() {
       <AthleteBanner id={id} onEdit={() => setEditOpen(true)} onShare={share} copied={copied} onChanged={() => refetch()} />
       <StatsRibbon stats={dashboard?.stats} />
 
-      {/* Sections down the left like a profile's menu; the record fills the right. */}
-      <div className="mt-6 grid items-start gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-4 lg:sticky lg:top-4">
-          <SectionNav active={active.key} onPick={(k) => setParams({ tab: k })} isLocked={isLocked} />
-        </aside>
+      {/* The sections as one tab row, the record full width beneath it. */}
+      <div className="mt-6 space-y-5">
+        <SectionNav active={active.key} onPick={(k) => setParams({ tab: k })} isLocked={isLocked} />
 
         <div className="min-w-0 space-y-4">
-          <h2 className="text-lg font-black text-slate-900 dark:text-slate-100">{active.label}</h2>
           {locked ? <LockedTab label={active.label} /> : (
             <>
               {active.key === 'overview' && <ParticipantDashboard />}

@@ -33,36 +33,33 @@ const where = (g: AchievementGroup) => g.instances
   .map((it) => [it.championship, it.tournament, it.sport].filter((p, i, all) => p && all.indexOf(p) === i).join(' · '))
   .join('\n');
 
-/** The trophy cabinet: one gold disc per honour on a navy shelf, its count on the rim. */
+/** The trophy cabinet: a slim navy shelf of gold medal chips, the count on each disc. */
 function TrophyCabinet({ groups }: { groups: AchievementGroup[] }) {
   return (
-    <section className={cn('relative overflow-hidden rounded-2xl text-white', PERSONAL_NAVY)}>
+    <section className={cn('relative overflow-hidden rounded-2xl border-b-2 border-amber-400/60 text-white', PERSONAL_NAVY)}>
       <KitStripes />
-      <div className="relative flex items-center justify-between gap-2 px-5 pt-4">
-        <span className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.12em]"><Trophy size={15} className="text-amber-300" aria-hidden />Trophy cabinet</span>
-        {groups.length > 0 && <Link to="/profile?tab=achievements" className="inline-flex items-center gap-1 text-xs font-bold text-[var(--accent)] hover:underline">All honours<ChevronRight size={14} aria-hidden /></Link>}
-      </div>
-      {groups.length === 0 ? (
-        <div className="relative flex items-center gap-4 px-5 pb-2 pt-4">
-          <span className="grid h-16 w-16 shrink-0 place-items-center rounded-full border-2 border-dashed border-white/20 text-white/30" aria-hidden><Trophy size={24} /></span>
-          <span className="text-sm text-white/60">Your first honour lands on this shelf - player of the match, a medal, a title.</span>
-        </div>
-      ) : (
-        <div className="relative flex gap-5 overflow-x-auto px-5 pb-1 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {groups.map((g) => (
-            <div key={g.award_name} title={`${g.award_name}\n${where(g)}`} className="flex w-24 shrink-0 cursor-help flex-col items-center text-center">
-              <span className="relative grid h-16 w-16 place-items-center rounded-full bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 text-amber-950 shadow-lg shadow-amber-500/30 ring-4 ring-amber-300/20">
-                <Trophy size={26} aria-hidden />
-                {g.count > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-white px-1.5 py-px text-[11px] font-black tabular-nums text-[#0a1630] shadow">×{g.count}</span>}
+      <div className="relative flex items-center gap-3 px-4 py-3">
+        <span className="flex shrink-0 items-center gap-1.5 text-xs font-black uppercase tracking-[0.12em]"><Trophy size={14} className="text-amber-300" aria-hidden /><span className="max-sm:hidden">Trophy cabinet</span></span>
+        {/* One line, no scroll: chips that would not fit wrap onto a hidden second line, so only whole ones show. "All" lists the rest. */}
+        <span className="flex h-[42px] min-w-0 flex-1 flex-wrap content-start gap-x-2 gap-y-4 overflow-hidden pt-1">
+          {groups.length === 0 ? (
+            <span className="truncate text-xs text-white/55">Your first honour lands here - player of the match, a medal, a title.</span>
+          ) : groups.map((g) => (
+            <span key={g.award_name} title={`${g.award_name}\n${where(g)}`}
+              className="flex shrink-0 cursor-help items-center gap-2 rounded-full bg-white/[0.07] py-1 pl-1 pr-3 ring-1 ring-amber-300/25">
+              <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 text-amber-950 shadow shadow-amber-500/40">
+                <Trophy size={13} aria-hidden />
+                {g.count > 1 && <span className="absolute -right-1.5 -top-1 rounded-full bg-white px-1 text-[9px] font-black tabular-nums text-[#0a1630]">×{g.count}</span>}
               </span>
-              <span className="mt-2 line-clamp-2 text-xs font-bold leading-tight">{g.award_name}</span>
-              {g.latest_date && <span className="mt-0.5 text-[10px] text-white/45">{fmtDate(g.latest_date)}</span>}
-            </div>
+              <span className="leading-tight">
+                <span className="block whitespace-nowrap text-xs font-bold">{g.award_name}</span>
+                {g.latest_date && <span className="block text-[10px] text-white/45">{fmtDate(g.latest_date)}</span>}
+              </span>
+            </span>
           ))}
-        </div>
-      )}
-      {/* The shelf itself. */}
-      <div aria-hidden className="relative mx-5 mb-4 mt-2 h-1.5 rounded-full bg-gradient-to-r from-amber-500/50 via-amber-300/30 to-transparent" />
+        </span>
+        {groups.length > 0 && <Link to="/profile?tab=achievements" className="inline-flex shrink-0 items-center gap-0.5 text-xs font-bold text-[var(--accent)] hover:underline">All<ChevronRight size={14} aria-hidden /></Link>}
+      </div>
     </section>
   );
 }
@@ -101,7 +98,11 @@ function FormTile({ m, iconOf }: { m: MatchSummary; iconOf: (s: string | null) =
 function JourneyStop({ e, iconOf, last }: { e: EventCardData; iconOf: (s: string | null) => string; last: boolean }) {
   const look = eventStatusLook(e.status);
   const start = e.start_date ? new Date(e.start_date) : null;
-  const rate = e.match_count ? Math.round((e.win_count / e.match_count) * 100) : 0;
+  // The bar splits only decided matches into W / D / L; unplayed ones are counted apart, not as "not won".
+  const w = e.win_count; const d = e.draw_count ?? 0; const l = e.loss_count ?? 0;
+  const decided = w + d + l;
+  const toPlay = Math.max(0, e.match_count - (e.played_count ?? decided));
+  const pct = (n: number) => (decided ? (n / decided) * 100 : 0);
   return (
     <li className="relative grid grid-cols-[3.25rem_1.5rem_minmax(0,1fr)] gap-x-2 sm:grid-cols-[5rem_1.75rem_minmax(0,1fr)]">
       {/* When: month over year. */}
@@ -127,9 +128,14 @@ function JourneyStop({ e, iconOf, last }: { e: EventCardData; iconOf: (s: string
           {e.sports.length > 0 && <span className="flex items-center gap-0.5" title={e.sports.join(', ')}>{e.sports.slice(0, 6).map((s) => <span key={s} aria-hidden>{iconOf(s)}</span>)}{e.sports.length > 6 && <span className="ml-0.5 font-bold">+{e.sports.length - 6}</span>}</span>}
         </span>
         <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="h-1.5 min-w-[6rem] flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${rate}%` }} /></span>
-          <span className="shrink-0 text-xs font-bold tabular-nums text-slate-600 dark:text-slate-300">
-            {e.win_count} of {e.match_count} won <span className="font-semibold text-slate-400">· {e.team_count} team{e.team_count === 1 ? '' : 's'}</span>
+          <span className="flex h-1.5 min-w-[6rem] flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" title={decided ? `${w} won, ${d} drawn, ${l} lost` : 'Nothing decided yet'}>
+            <span className="bg-emerald-500" style={{ width: `${pct(w)}%` }} />
+            <span className="bg-slate-400" style={{ width: `${pct(d)}%` }} />
+            <span className="bg-rose-500" style={{ width: `${pct(l)}%` }} />
+          </span>
+          <span className="min-w-0 text-xs font-bold tabular-nums text-slate-600 dark:text-slate-300">
+            {decided ? <><span className="text-emerald-600 dark:text-emerald-400">{w}W</span> · {d}D · <span className="text-rose-500">{l}L</span></> : 'No results yet'}
+            <span className="font-semibold text-slate-400">{toPlay > 0 && ` · ${toPlay} to play`} · {e.team_count} team{e.team_count === 1 ? '' : 's'}</span>
           </span>
         </span>
       </Link>

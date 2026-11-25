@@ -33,14 +33,18 @@ interface Match {
 interface Home {
   next: Match | null;
   live: Match[];
+  /** Every live match, though only the first two are sent. */
+  live_total?: number;
   pending: Match[];
   recent: Match[];
   teams: Array<{ id: string; name: string | null; organization: string | null; sport: string | null; role: string }>;
-  stats: { games: number; events: number; sports: number; wins: number };
+  stats: { games: number; events: number; sports: number; wins: number; draws?: number; losses?: number };
 }
 
 // Lists here grow without bound; cap each so this first screen stays an overview.
 const ROW_LIMIT = 5;
+// Live matches shown on My Game before "View all".
+const LIVE_LIMIT = 2;
 const CARD = 'overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const CARD_HEAD = 'flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800';
 
@@ -247,10 +251,13 @@ export function MyGamePage() {
 
   if (isLoading) return <MyGameSkeleton />;
   const d = data ?? { next: null, live: [], pending: [], recent: [], teams: [], stats: { games: 0, events: 0, sports: 0, wins: 0 } };
-  const winRate = d.stats.games ? Math.round((d.stats.wins / d.stats.games) * 100) : null;
+  // Over decided matches (W + D + L), as on the profile: a ranking event has no result to win.
+  const decided = d.stats.wins + (d.stats.draws ?? 0) + (d.stats.losses ?? 0);
+  const winRate = decided ? Math.round((d.stats.wins / decided) * 100) : null;
   // Newest first from the API; the form guide reads left to right, oldest to newest.
   const form = d.recent.filter((r) => r.result && r.result !== 'pending').slice(0, 5).reverse();
   const n = d.next;
+  const liveTotal = d.live_total ?? d.live.length;
 
   return (
     <div className="space-y-5 pb-16">
@@ -268,7 +275,7 @@ export function MyGamePage() {
                 {[`${d.teams.length} squad${d.teams.length === 1 ? '' : 's'}`, `${d.stats.sports} sport${d.stats.sports === 1 ? '' : 's'}`, `${d.stats.events} event${d.stats.events === 1 ? '' : 's'}`].map((c) => (
                   <span key={c} className="rounded-full bg-white/10 px-2.5 py-0.5 ring-1 ring-white/15">{c}</span>
                 ))}
-                {d.live.length > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500 px-2.5 py-0.5 font-bold text-white"><LiveDot className="h-1.5 w-1.5" />{d.live.length} live</span>}
+                {liveTotal > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500 px-2.5 py-0.5 font-bold text-white"><LiveDot className="h-1.5 w-1.5" />{liveTotal} live</span>}
               </div>
             </div>
           </div>
@@ -284,7 +291,8 @@ export function MyGamePage() {
       {/* Right now: only when something is live or waiting on you. Both cards show
           together, an empty one with a placeholder, so the row never sits half blank. */}
       {(d.live.length > 0 || d.pending.length > 0) && (
-        <div className="grid gap-4 lg:grid-cols-2">
+        // Each card keeps its own height, so an empty one never stretches into a blank block.
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           {d.live.length === 0 ? (
             <section className={cn(CARD, 'flex flex-col')}>
               <div className={CARD_HEAD}>
@@ -302,10 +310,10 @@ export function MyGamePage() {
                   <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-500 px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-white"><LiveDot className="h-1.5 w-1.5" />Live</span>
                   <span className="text-sm font-black text-slate-900 dark:text-slate-100">Playing now</span>
                 </span>
-                <span className="text-xs font-semibold text-rose-600 dark:text-rose-300">{d.live.length} match{d.live.length === 1 ? '' : 'es'}</span>
+                <span className="text-xs font-semibold text-rose-600 dark:text-rose-300">{liveTotal} match{liveTotal === 1 ? '' : 'es'}</span>
               </div>
               <ul>
-                {(expanded.live ? d.live : d.live.slice(0, ROW_LIMIT)).map((g) => (
+                {d.live.slice(0, LIVE_LIMIT).map((g) => (
                   <li key={g.id}>
                     <button type="button" onClick={() => nav(`/profile/matches/${g.id}`)}
                       className="group flex w-full items-center gap-3 border-t border-slate-100 px-4 py-3 text-left transition first:border-t-0 hover:bg-rose-50/40 dark:border-slate-800 dark:hover:bg-rose-500/5">
@@ -318,7 +326,12 @@ export function MyGamePage() {
                   </li>
                 ))}
               </ul>
-              <MoreToggle total={d.live.length} expanded={!!expanded.live} onToggle={() => toggle('live')} />
+              {/* Two at most here; the rest wait on All matches' Live tab rather than stretching this card. */}
+              {liveTotal > LIVE_LIMIT && (
+                <Link to="/profile/matches?view=live" className="block w-full border-t border-rose-100 py-2.5 text-center text-[13px] font-semibold text-rose-600 transition hover:bg-rose-50/60 dark:border-rose-500/20 dark:text-rose-300 dark:hover:bg-rose-500/10">
+                  View all {liveTotal} live
+                </Link>
+              )}
             </section>
           )}
           {d.pending.length === 0 ? (

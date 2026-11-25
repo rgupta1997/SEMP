@@ -397,7 +397,7 @@ export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect
 // Widths apply from sm up. Below that a modal is a full-width sheet, so a
 // `max-w-lg` here would leave a 78px gutter on a 390px phone for no reason.
 const MODAL_WIDTHS = { lg: 'sm:max-w-lg', xl: 'sm:max-w-xl', '2xl': 'sm:max-w-2xl', '3xl': 'sm:max-w-3xl', '4xl': 'sm:max-w-4xl', '5xl': 'sm:max-w-5xl' } as const;
-export function Modal({ title, onClose, children, footer, wide, size, dismissible = true, banner }:
+export function Modal({ title, onClose, children, footer, wide, size, dismissible = true, banner, bannerTone }:
   {
     title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
     size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean;
@@ -408,6 +408,8 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
      * so the dialog has an accessible name even though it is not rendered.
      */
     banner?: ReactNode;
+    /** The banner's background, where a workspace has its own (personal navy). Defaults to blue. */
+    bannerTone?: string;
   }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'sm:max-w-2xl' : 'sm:max-w-lg';
 
@@ -459,7 +461,7 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
           // hue pushed dark, which for a lot of tenants desaturates almost to
           // black. This banner is meant to read as blue regardless of whose
           // theme is active.
-          banner ? 'items-start bg-blue-950' : 'items-center sm:border-b sm:border-slate-200 dark:sm:border-slate-800',
+          banner ? cn('items-start', bannerTone ?? 'bg-blue-950') : 'items-center sm:border-b sm:border-slate-200 dark:sm:border-slate-800',
         )}>
           {banner ?? <h3 className="t-section min-w-0 dark:text-slate-100">{title}</h3>}
           <button
