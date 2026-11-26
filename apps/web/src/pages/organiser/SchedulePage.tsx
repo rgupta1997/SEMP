@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarRange, ClipboardList, ClipboardPen, Eye, Grid3x3, Layers, LayoutList, Network, Pencil, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, Trophy, UserPlus } from 'lucide-react';
+import { ArrowRight, CalendarRange, ClipboardList, ClipboardPen, Eye, Flag, Scale, Users, Grid3x3, Layers, LayoutList, Network, Pencil, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, Trophy, UserPlus } from 'lucide-react';
 import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -929,17 +929,15 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
             done={phases.done} total={playable} onTimeline={onTimeline} />
         )}
         {canManage && knockoutPending && !hasPlayed && !archived && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
-            <span>The {isLeague ? 'league' : 'group'} stage is set up. Next, add the knockout and choose how many teams advance.</span>
-            <Button size="sm" variant="outline" onClick={() => setConfiguringStages(true)}>Set up knockout</Button>
-          </div>
+          <DrawNotice tone="brand" icon={Network} title="Knockout next"
+            text={`The ${isLeague ? 'league' : 'group'} stage is set up. Add the knockout and choose how many teams advance.`}
+            action="Set up knockout" onAction={() => setConfiguringStages(true)} />
         )}
         {openTies > 0 && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-            <span>{openTies === 1 ? 'A tie needs' : `${openTies} ties need`} a hand-picked order before the next stage or the placings can be settled.</span>
-            {/* The group tables live on Results, under this discipline's Point tally tab. */}
-            <Button size="sm" variant="outline" onClick={() => drawNavigate(`/championships/${drawEventId}/results?tally=${td.id}`)}>View point tally</Button>
-          </div>
+          // The group tables live on Results, under this discipline's Point tally tab.
+          <DrawNotice tone="amber" icon={Scale} title={openTies === 1 ? 'A tie to settle' : `${openTies} ties to settle`}
+            text="The tie-breakers can't split these teams. Pick their order before the next stage or the placings can be settled."
+            action="View point tally" onAction={() => drawNavigate(`/championships/${drawEventId}/results?tally=${td.id}`)} />
         )}
         {isLoading ? <div className="space-y-2"><MatchCardSkeleton /><MatchCardSkeleton /></div> : fixtures.length === 0 ? (
           <div className="flex items-center gap-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -1080,6 +1078,31 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   );
 }
 
+/** A notice on a draw: what needs doing, why, and one pill to go do it. */
+function DrawNotice({ tone, icon: Icon, title, text, action, onAction }: {
+  tone: 'amber' | 'brand'; icon: typeof Scale; title: string; text: string; action: string; onAction: () => void;
+}) {
+  const amber = tone === 'amber';
+  return (
+    <div role="status" className={cn('mb-3 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 sm:flex-nowrap sm:px-4',
+      amber ? 'border-amber-200 bg-amber-50/70 dark:border-amber-500/30 dark:bg-amber-500/10' : 'border-brand-200 bg-brand-50/60 dark:border-brand-500/30 dark:bg-brand-500/10')}>
+      <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-full',
+        amber ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' : 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300')} aria-hidden>
+        <Icon size={17} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className={cn('text-sm font-black', amber ? 'text-amber-900 dark:text-amber-100' : 'text-brand-900 dark:text-brand-100')}>{title}</div>
+        <div className={cn('text-xs leading-snug', amber ? 'text-amber-800/90 dark:text-amber-200/90' : 'text-brand-800/90 dark:text-brand-200/90')}>{text}</div>
+      </div>
+      <button type="button" onClick={onAction}
+        className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-white px-3.5 py-1.5 text-[13px] font-semibold shadow-sm transition max-sm:ml-12 dark:bg-slate-900',
+          amber ? 'border-amber-300 text-amber-800 hover:border-amber-400 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-200' : 'border-brand-300 text-brand-700 hover:bg-brand-50 dark:border-brand-500/40 dark:text-brand-200')}>
+        {action}<ArrowRight size={14} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 function SportBlock({ ts, draws: allSportDraws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, sportIcon, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamPick = null, phaseFilter = '', onTimeline }:
   { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; sportIcon?: string | null; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; teamPick?: TeamPick; phaseFilter?: PhaseFilter; onTimeline: () => void }) {
   // With a team or phase picked, only the draws that have such a match. Ordered
@@ -1173,6 +1196,7 @@ function buildDays(startISO?: string, endISO?: string): string[] {
 
 export function SchedulePage() {
   const { eventId, organises, canManageSport, championship } = useEvent();
+  const navigate = useNavigate();
   const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
   // Timeline status filter, driven by clicking the colour legend (empty = show all).
   const [timelineStatus, setTimelineStatus] = useState('');
@@ -1343,7 +1367,7 @@ export function SchedulePage() {
 
   if (tournamentsLoading) return <PageSkeleton kind="schedule" />;
   if (tournaments.length === 0) {
-    return <EmptyState icon="⚑" title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
+    return <EmptyState icon={<Flag size={24} />} title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
   }
 
   // The picked institute's squads, with their sport and match counts, for the squad chips.
@@ -1397,9 +1421,10 @@ export function SchedulePage() {
       ) : tsportsLoading ? (
         <div className="space-y-6"><SportSectionSkeleton /><SportSectionSkeleton cards={2} /></div>
       ) : tsports.length === 0 ? (
-        <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
+        <EmptyState icon={<Flag size={24} />} title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures."
+          action={organises ? <Button onClick={() => navigate(`/championships/${eventId}/setup?tab=sports`)}>Open setup</Button> : undefined} />
       ) : !teamHasMatch ? (
-        <EmptyState icon="⚑" title="No matches for this team" description="Pick another team, or a different sport."
+        <EmptyState icon={<Users size={24} />} title="No matches for this team" description="Pick another team, or a different sport."
           action={<Button variant="outline" onClick={() => { setTeamFilter(''); setSideFilter(''); }}>Show all teams</Button>} />
       ) : (
         <div className="space-y-6">
@@ -1409,8 +1434,12 @@ export function SchedulePage() {
             : <EventPulse title={teamFilter ? `${teamName(teamFilter)} · matches` : pickedSide ? `${pickedSide.full} · matches` : 'Event progress'} counts={pulseCounts} value={phaseFilter} onChange={setPhaseFilter} />}
           <SportChips sports={chipSports} value={pickedSports} onChange={(ids) => setSportParam(ids.join(','))} />
           {!phaseHasMatch ? (
-            <EmptyState icon="🏁" title="Nothing here right now" description="No matches are in this state. Pick another tile, or show everything."
+            <EmptyState icon={<Flag size={24} />} title="Nothing here right now" description="No matches are in this state. Pick another tile, or show everything."
               action={<Button variant="outline" onClick={() => setPhaseFilter('')}>Show all matches</Button>} />
+          ) : !allDraws.some((d) => visibleTsports.some((ts) => ts.id === d.tournament_sport_id)) ? (
+            <EmptyState icon={<Trophy size={24} />} title="No disciplines to schedule yet"
+              description="Each sport needs at least one discipline (Men's, Women's, Singles…) before its draw can be made and matches scheduled."
+              action={organises ? <Button onClick={() => navigate(`/championships/${eventId}/setup?tab=sports`)}>Add disciplines</Button> : undefined} />
           ) : visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManageSport(ts.sport_id)} teamPick={teamPick} phaseFilter={phaseFilter} onTimeline={() => setTopView('timeline')} />)}
         </div>
       )}

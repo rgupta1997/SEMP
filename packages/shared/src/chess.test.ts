@@ -32,6 +32,10 @@ describe('a chess game', () => {
     expect(formatPoints(3)).toBe('3');
     expect(formatPoints(0)).toBe('0');
     expect(formatPoints(null)).toBe('');
+    // Negative halves: an adjustment of -1.5 used to print "-2½".
+    expect(formatPoints(-1.5)).toBe('-1½');
+    expect(formatPoints(-0.5)).toBe('-½');
+    expect(formatPoints(-2)).toBe('-2');
   });
 });
 

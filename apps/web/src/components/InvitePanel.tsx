@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Search, Send, Trash2, X } from 'lucide-react';
+import { PillButton, TeamAvatar } from '../features/schedule/ScheduleParts';
 import { useQueryClient } from '@tanstack/react-query';
 import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { Avatar, Badge, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
+import { Avatar, Badge, Button, Card, Input, PILL_FIELD, Spinner, StatusBadge, cn, toast } from './ui';
 import { ApplicationsQueue } from '../pages/organiser/ApplicationsQueue';
 import { INVITATION_STATUS, INVITE_BUCKET, invitationBucket, type InviteFilter } from '../lib/inviteStatus';
 
@@ -106,12 +107,16 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
           ))}
         </div>
       )}
-      <Input
-        value={query}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder="Search organizations / teams…"
-      />
+      <div className="relative">
+        <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden />
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search organizations / teams…"
+          className={cn(PILL_FIELD, 'w-full pl-9 pr-3')}
+        />
+      </div>
       {open && (
           <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
             {isFetching && results.length === 0 ? (
@@ -276,7 +281,11 @@ function CampusInvites({ eventId, path, readOnly }: { eventId: string; path: str
  * honest shape: these are two controls that happen to answer the same question.
  * The one hook here runs unconditionally, so the early return below is safe.
  */
-export function InvitePanel({ eventId, readOnly = false }: { eventId: string; readOnly?: boolean }) {
+export function InvitePanel({ eventId, readOnly = false, intro = true }: {
+  eventId: string; readOnly?: boolean;
+  /** The how-it-works line; off where the page above already explains the step. */
+  intro?: boolean;
+}) {
   const path = `/championships/${eventId}/invitations`;
   // Asked of the server rather than inferred - the shape is a property of the
   // championship, not something the client can work out.
@@ -285,7 +294,7 @@ export function InvitePanel({ eventId, readOnly = false }: { eventId: string; re
   if (isLoading) return <Spinner />;
   return invitable?.intra
     ? <CampusInvites eventId={eventId} path={path} readOnly={readOnly} />
-    : <OrganisationInvites eventId={eventId} path={path} readOnly={readOnly} />;
+    : <OrganisationInvites eventId={eventId} path={path} readOnly={readOnly} intro={intro} />;
 }
 
 // While archived nothing here can change - the server refuses it too.
@@ -294,7 +303,7 @@ const readOnlyTitle = (readOnly: boolean) => (readOnly ? ARCHIVED_READ_ONLY_MESS
 // Host-side invite manager for an OPEN championship: search the master institution
 // list and send the request straight to the org. Reused in the create wizard's
 // Invite step and the Invite tab.
-function OrganisationInvites({ eventId, path, readOnly }: { eventId: string; path: string; readOnly: boolean }) {
+function OrganisationInvites({ eventId, path, readOnly, intro = true }: { eventId: string; path: string; readOnly: boolean; intro?: boolean }) {
   const qc = useQueryClient();
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -341,16 +350,18 @@ function OrganisationInvites({ eventId, path, readOnly }: { eventId: string; pat
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500 dark:text-slate-400">Search the master list and send the request straight to the organizations. They confirm and add their own teams - you don't enter rosters.</p>
+      {intro && <p className="text-sm text-slate-500 dark:text-slate-400">Search the master list and send the request straight to the organizations. They confirm and add their own teams - you don't enter rosters.</p>}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="min-w-[200px] flex-1">
+      <div className="flex items-end gap-2">
+        <label className="min-w-0 flex-1">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Organizations / teams</span>
           <OrgPicker value={orgs} onChange={setOrgs} excludeIds={invitedIds} />
         </label>
-        <Button onClick={submit} disabled={inviting || orgs.length === 0 || readOnly} title={readOnlyTitle(readOnly)}>
-          {inviting ? 'Inviting…' : orgs.length > 1 ? `+ Invite ${orgs.length}` : '+ Invite'}
-        </Button>
+        {/* A primary pill at the field's height, like the other setup actions. */}
+        <button type="button" onClick={submit} disabled={inviting || orgs.length === 0 || readOnly} title={readOnlyTitle(readOnly)}
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-brand-600 px-4 text-[13px] font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none dark:bg-brand-500">
+          <Send size={14} aria-hidden />{inviting ? 'Inviting…' : orgs.length > 1 ? `Invite ${orgs.length}` : 'Invite'}
+        </button>
       </div>
 
       {/* Applications live beside invitations, because they are the same question
@@ -371,26 +382,28 @@ function OrganisationInvites({ eventId, path, readOnly }: { eventId: string; pat
           No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
         </div>
       ) : visibleInvites.length === 0 ? null : (
-        <div className="space-y-2">
-          {visibleInvites.map((inv) => (
-            <Card key={inv.id} className="flex items-center justify-between gap-3 p-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium text-slate-800 dark:text-slate-200">{inv.target ?? inv.organizations?.name ?? inv.org_name}</div>
-                {inv.organizations?.city && <div className="text-xs text-slate-500 dark:text-slate-400">{inv.organizations.city}</div>}
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={inv.status} label={inv.status === INVITATION_STATUS.ACCEPTED ? 'Accepted' : undefined} />
-                {inv.status === INVITATION_STATUS.PENDING && (
-                  <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                    onClick={() => cancel.mutate(inv.id, { onSuccess: () => toast.success('Invitation cancelled'), onError: (e: any) => toast.error(e.message) })}
-                    disabled={cancel.isPending || readOnly} title={readOnlyTitle(readOnly)}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div className="border-b border-slate-100 px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:border-slate-800">Invitations sent</div>
+          <ul>
+            {visibleInvites.map((inv) => {
+              const name = inv.target ?? inv.organizations?.name ?? inv.org_name;
+              return (
+                <li key={inv.id} className="flex items-center gap-3 border-t border-slate-100 px-4 py-2.5 first:border-t-0 hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30">
+                  <TeamAvatar name={name} short={inv.organizations?.short_name} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold text-slate-800 dark:text-slate-100" title={name}>{name}</span>
+                    {inv.organizations?.city && <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{inv.organizations.city}</span>}
+                  </span>
+                  <StatusBadge status={inv.status} label={inv.status === INVITATION_STATUS.ACCEPTED ? 'Accepted' : undefined} />
+                  {inv.status === INVITATION_STATUS.PENDING && (
+                    <PillButton icon={X} onClick={() => cancel.mutate(inv.id, { onSuccess: () => toast.success('Invitation cancelled'), onError: (e: any) => toast.error(e.message) })}
+                      disabled={cancel.isPending || readOnly} title={readOnlyTitle(readOnly) ?? 'Cancel this invitation'}>Cancel</PillButton>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
     </div>
   );

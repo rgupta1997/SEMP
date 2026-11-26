@@ -101,9 +101,10 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>, userId: string) {
     sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
-    my_team: mine ? { id: mine.id, name: mine.name } : null,
+    // short_name lets the crests read "HTU", not initials of "HTU Football".
+    my_team: mine ? { id: mine.id, name: mine.name, short_name: mine.short_name ?? null } : null,
     opponent: opp
-      ? { id: opp.id, name: opp.name, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null }
+      ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null }
       : null,
     my_score: myScore ?? null,
     opp_score: oppScore ?? null,
@@ -153,7 +154,9 @@ interface Settlement { pens: Shootout | null; settled: KhoSettlement | null }
 
 // MatchSummary built from a `matchSelect` row. `shootouts` comes from loadShootouts.
 function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Settlement>) {
-  const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
+  // On neither side (a match you only score), keep the fixture's own home-first order.
+  const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id)
+    || !(f.away_team_id != null && myTeamIds.has(f.away_team_id));
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
   const ts = f.tournament_disciplines?.tournament_sports;
@@ -315,8 +318,10 @@ export function makeMeRouter(prisma: Prisma): Router {
         team_id: true,
         is_active: true,
         left_at: true,
+        role: true,
         teams: {
           select: {
+            name: true,
             sports: { select: { id: true, name: true, icon: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
             // Archived events leave My Game's championship cards along with the event.
@@ -571,6 +576,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       id: string; name: string; slug: string; status: string;
       start_date: Date | null; end_date: Date | null; venue: string | null;
       team_count: number; match_count: number; win_count: number;
+      /** Finished matches, and how they went: the card splits its bar over these, not over unplayed ones. */
+      played_count: number; draw_count: number; loss_count: number;
       _sports: Set<string>;
       /** Still on one of the squads entered here. */
       on_squad: boolean;
@@ -582,7 +589,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         if (!ev) continue;
         let card = eventMap.get(ev.id);
         if (!card) {
-          card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, _sports: new Set(), on_squad: false };
+          card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, played_count: 0, draw_count: 0, loss_count: 0, _sports: new Set(), on_squad: false };
           eventMap.set(ev.id, card);
         }
         card.team_count++;
@@ -595,7 +602,11 @@ export function makeMeRouter(prisma: Prisma): Router {
       const card = evId ? eventMap.get(evId) : undefined;
       if (!card) continue;
       card.match_count++;
-      if (resultFor(f, teamIds) === 'won') card.win_count++;
+      if (f.status === 'completed') card.played_count++;
+      const result = resultFor(f, teamIds);
+      if (result === 'won') card.win_count++;
+      else if (result === 'draw') card.draw_count++;
+      else if (result === 'lost') card.loss_count++;
     }
     // An old squad's event with none of its matches theirs was entered after they left.
     for (const [id, c] of eventMap) if (!c.on_squad && c.match_count === 0) eventMap.delete(id);
@@ -605,6 +616,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         id: c.id, name: c.name, slug: c.slug, status: c.status,
         start_date: c.start_date, end_date: c.end_date, venue: c.venue,
         team_count: c.team_count, match_count: c.match_count, win_count: c.win_count,
+        played_count: c.played_count, draw_count: c.draw_count, loss_count: c.loss_count,
         sports: [...c._sports],
       }))
       .sort((a, b) => (b.start_date?.getTime() ?? 0) - (a.start_date?.getTime() ?? 0));
@@ -646,7 +658,7 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     const empty = {
       next: null, live: [], pending: [], recent: [], teams: [],
-      stats: { games: 0, events: 0, sports: 0, wins: 0 },
+      stats: { games: 0, events: 0, sports: 0, wins: 0, draws: 0, losses: 0 },
     };
     if (places.length === 0) { res.json(empty); return; }
 
@@ -657,6 +669,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     // Played results stay: they are the player's history.
     const activeEvent = { tournament_disciplines: { tournament_sports: { tournaments: { championships: { archived_at: null } } } } };
 
+    const liveTotal = await prisma.fixtures.count({ where: { ...mine, ...activeEvent, status: 'live' } });
     const [upcoming, live, played, officiating] = await Promise.all([
       // Next fixture: the soonest one still to come. Unscheduled fixtures have a
       // null scheduled_at and are deliberately excluded - "next" has to have a when.
@@ -666,7 +679,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       }),
       prisma.fixtures.findMany({
         where: { ...mine, ...activeEvent, status: 'live' },
-        select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 4,
+        // My Game shows two; the total below says how many more 'View all' leads to.
+        select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 2,
       }),
       prisma.fixtures.findMany({
         where: { ...record, status: { in: PLAYED_STATUSES } },
@@ -720,13 +734,17 @@ export function makeMeRouter(prisma: Prisma): Router {
     const allPlayed = await prisma.fixtures.count({
       where: { ...record, status: { in: PLAYED_STATUSES } },
     });
-    const allWins = await prisma.fixtures.count({
-      where: { ...record, status: { in: PLAYED_STATUSES }, winner_team_id: { in: [...teamIds] } },
+    // W / D / L through the same tally the profile uses, so both pages show one win rate.
+    const playedRows = await prisma.fixtures.findMany({
+      where: { ...record, status: { in: PLAYED_STATUSES } },
+      select: { id: true, status: true, home_team_id: true, away_team_id: true, home_score: true, away_score: true, winner_team_id: true },
     });
+    const { wins: allWins, draws: allDraws, losses: allLosses } = tally(playedRows as FixtureRow[], teamIds);
 
     res.json({
       next: upcoming[0] ? summariseLean(upcoming[0] as FixtureRow, teamIds) : null,
       live: live.map((f) => summariseLean(f as FixtureRow, teamIds)),
+      live_total: liveTotal,
       recent: played.map((f) => summariseLean(f as FixtureRow, teamIds, playedPens)),
       pending: officiating.map((f) => ({
         ...summariseLean(f as FixtureRow, teamIds),
@@ -734,12 +752,12 @@ export function makeMeRouter(prisma: Prisma): Router {
       })),
       teams: memberships.map((m) => ({
         id: m.team_id,
-        name: (m.teams as any)?.name ?? null,
+        name: m.teams?.name ?? null,
         organization: m.teams?.organizations?.short_name ?? m.teams?.organizations?.name ?? null,
         sport: m.teams?.sports?.name ?? null,
-        role: (m as any).role ?? 'player',
+        role: m.role ?? 'player',
       })),
-      stats: { games: allPlayed, events: eventIds.size, sports: sportIds.size, wins: allWins },
+      stats: { games: allPlayed, events: eventIds.size, sports: sportIds.size, wins: allWins, draws: allDraws, losses: allLosses },
     });
   }));
 
@@ -863,8 +881,8 @@ export function makeMeRouter(prisma: Prisma): Router {
         discipline: f.tournament_disciplines?.disciplines?.name ?? null,
         tournament: ts?.tournaments?.name ?? null,
         championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
-        my_team: { id: mine.id, name: mine.name, organization: mine.organizations?.name ?? null },
-        opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.name ?? null } : null,
+        my_team: { id: mine.id, name: mine.name, short_name: mine.short_name ?? null, organization: mine.organizations?.name ?? null },
+        opponent: opp ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.name ?? null } : null,
         my_role: myMember?.role ?? null,
         former_member: formerMember,
         jersey_number: myMember?.jersey_number ?? null,

@@ -13,7 +13,7 @@ import { cn } from './ui';
  * the two most common users (an official at the pitch, a student checking a
  * fixture) never see the desktop layout at all.
  *
- * Four destinations plus More. Four because a fifth cell drops each target below
+ * Three destinations, More in the centre, then Account. Four because a fifth cell drops each target below
  * the ~64px that a thumb hits reliably at the bottom corners of a 390px screen, and
  * because the fifth item is almost never the one you want - the drawer still has
  * everything, so More is a complete escape hatch rather than a truncation.
@@ -31,7 +31,7 @@ const ICONS: Record<string, LucideIcon> = NAV_ICONS;
 
 interface Group { group: string; items: Array<{ to: string; label: string; icon: React.ReactNode; end?: boolean }> }
 
-const CELL =
+export const CELL =
   'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 pt-2 pb-1.5 transition-colors';
 
 /** The active pill sits above the icon so it reads at a glance without colour alone. */
@@ -61,12 +61,14 @@ function Cell({ to, label, Icon, end, locked }: { to: string; label: string; Ico
 }
 
 export function BottomNav({
-  items, groups, ctx, onMore,
+  items, groups, ctx, onMore, trailing,
 }: {
   items: Array<NavItem & { locked: boolean }>;
   groups: Group[];
   ctx: WorkspaceContext | null;
   onMore: () => void;
+  /** The last cell: the account button. */
+  trailing?: React.ReactNode;
 }) {
   // Before any early return - a hook after a conditional `return null` changes the
   // hook order between renders and React throws.
@@ -78,21 +80,33 @@ export function BottomNav({
   const source = ctx && items.length ? items : flat;
   if (!source.length) return null;
 
-  // THE SECTION YOU ARE IN IS ALWAYS ONE OF THE FOUR.
-  //
-  // Taking the first four of a ten-item nav means that standing on Results - the
-  // sixth - the bar highlights nothing, and the reader cannot tell where they are
-  // or get back with one tap. If the current route is not in the first four it
-  // takes the fourth slot, so the bar always answers "where am I".
+  // THE SECTION YOU ARE IN IS ALWAYS IN THE BAR: if it is not among the first
+  // three it takes the third slot, so the bar always answers "where am I".
   const matches = (it: NavItem | { to: string }) => {
     const to = ctx && 'key' in it ? hrefFor(ctx, it as NavItem) : (it as { to: string }).to;
     return (it as NavItem).end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`);
   };
 
-  const four = source.slice(0, 4);
+  // Three sections with More in the centre and Account last: five cells, so More
+  // sits in the exact middle. It is always offered - with no phone top bar it is
+  // the only way into the drawer and its workspace switcher.
+  const shown = source.slice(0, 3);
   const activeIdx = source.findIndex(matches);
-  if (activeIdx >= 4) four[3] = source[activeIdx];
-  const hasMore = source.length > four.length || activeIdx >= 4;
+  if (activeIdx >= 3) shown[2] = source[activeIdx];
+
+  const cell = (it: (typeof source)[number]) => {
+    const anyIt = it as NavItem & { locked?: boolean; to: string };
+    const key = 'key' in it ? (it as NavItem).key : anyIt.to;
+    const to = ctx && 'key' in it ? hrefFor(ctx, it as NavItem) : anyIt.to;
+    return <Cell key={key} to={to} label={it.label} Icon={ICONS[key] ?? LayoutGrid} end={(it as NavItem).end} locked={anyIt.locked} />;
+  };
+
+  const moreButton = (
+    <button type="button" onClick={onMore} className={cn(CELL, 'text-slate-500 dark:text-slate-400')} aria-label="More sections">
+      <MoreHorizontal size={20} strokeWidth={1.9} />
+      <span className="text-[10px] font-semibold leading-none">More</span>
+    </button>
+  );
 
   return (
     <nav
@@ -102,28 +116,10 @@ export function BottomNav({
         'dark:border-slate-800 dark:bg-slate-900/95',
       )}
     >
-      {four.map((it) => {
-        const anyIt = it as NavItem & { locked?: boolean; to: string };
-        const key = 'key' in it ? (it as NavItem).key : anyIt.to;
-        const to = ctx && 'key' in it ? hrefFor(ctx, it as NavItem) : anyIt.to;
-        const Icon = ICONS[key] ?? LayoutGrid;
-        return (
-          <Cell
-            key={key}
-            to={to}
-            label={it.label}
-            Icon={Icon}
-            end={(it as NavItem).end}
-            locked={anyIt.locked}
-          />
-        );
-      })}
-      {hasMore && (
-        <button type="button" onClick={onMore} className={cn(CELL, 'text-slate-500 dark:text-slate-400')} aria-label="More sections">
-          <MoreHorizontal size={20} strokeWidth={1.9} />
-          <span className="text-[10px] font-semibold leading-none">More</span>
-        </button>
-      )}
+      {shown.slice(0, 2).map(cell)}
+      {moreButton}
+      {shown.slice(2).map(cell)}
+      {trailing}
     </nav>
   );
 }

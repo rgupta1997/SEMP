@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { CalendarRange, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react';
+import { PillButton } from '../../../features/schedule/ScheduleParts';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Textarea } from '../../../components/ui';
@@ -98,22 +99,27 @@ export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCrea
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400">A season groups the sports & disciplines that share a championship table.</p>
-        <Button onClick={() => setOpen(true)}>+ Add season</Button>
+      {/* Same toolbar as the other setup steps: count left, add right. */}
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-slate-400">{`${tournaments.length} season${tournaments.length === 1 ? '' : 's'}`}</span>
+        <PillButton icon={Plus} tone="primary" onClick={() => setOpen(true)}>Add season</PillButton>
       </div>
 
       {isLoading ? null : tournaments.length === 0 ? (
-        <EmptyState icon="⊟" title="No seasons" description="Add a season, then configure the sports and disciplines inside it."
-          action={<Button onClick={() => setOpen(true)}>+ Add season</Button>} />
+        <EmptyState icon={<CalendarRange size={24} />} title="No seasons" description="Add a season, then configure the sports and disciplines inside it."
+          action={<PillButton icon={Plus} tone="primary" onClick={() => setOpen(true)}>Add season</PillButton>} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {tournaments.map((t) => (
-            <Card key={t.id} className="cursor-pointer p-4 transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => setActive(t)}>
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
-              {t.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">{t.description}</p>}
-              <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">Click to view, edit or remove.</p>
-            </Card>
+            <button key={t.id} type="button" onClick={() => setActive(t)} title="View, edit or remove"
+              className="group flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-300 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-500/50">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"><CalendarRange size={20} aria-hidden /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-black text-slate-900 group-hover:text-brand-700 dark:text-slate-100 dark:group-hover:text-brand-300">{t.name}</span>
+                <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{t.description || 'No description'}</span>
+              </span>
+              <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-brand-500 dark:text-slate-600" aria-hidden />
+            </button>
           ))}
         </div>
       )}

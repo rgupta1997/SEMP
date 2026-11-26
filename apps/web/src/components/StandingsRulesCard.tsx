@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Pencil } from 'lucide-react';
+import { Minus, Pencil, Plus, RotateCcw, Settings2 } from 'lucide-react';
 import {
   DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_LABEL, EVENT_TITLES, defaultGroupRanking, eventTitleIn, isRankingEvent, isRankingFormatName,
   sportTitles, tiebreakerLabel,
@@ -10,7 +10,10 @@ import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { useEventPlan } from '../lib/eventPlan';
 import { MatchPointsFields, TiebreakerPicker } from './TiebreakerPicker';
-import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } from './ui';
+import { Checkbox, cn, toast } from './ui';
+import { PickList } from './PickList';
+import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, FIELD_LABEL, NUM_INPUT, TAG } from './formStyles';
+import { useUrlState } from './primitives';
 
 // Scoring-rules editor (organiser-only). Lets the host set the championship default
 // scheme and optionally override it per format or per discipline. Saving recomputes
@@ -121,8 +124,8 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
   const [text, setText] = useState(String(value));
   useEffect(() => { if (Number(text) !== value) setText(String(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</span>
+    <label className="block">
+      <span className={FIELD_LABEL}>{label}</span>
       <input
         type="text" inputMode="numeric"
         value={text}
@@ -132,7 +135,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
           onChange(cleaned === '' ? 0 : Math.min(999, parseInt(cleaned, 10)));
         }}
         onBlur={() => setText(String(value))}
-        className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        className={NUM_INPUT}
       />
     </label>
   );
@@ -140,16 +143,21 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
 
 function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
-    <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
-      <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}{hint && <span className="block text-xs text-slate-400 dark:text-slate-500">{hint}</span>}</span>
-    </label>
+    <div role="button" tabIndex={-1} onClick={() => onChange(!checked)}
+      className={cn('flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition',
+        checked ? 'border-brand-300 bg-brand-50/60 dark:border-brand-500/40 dark:bg-brand-500/10' : 'border-slate-200 bg-white hover:border-brand-200 dark:border-slate-700 dark:bg-slate-900')}>
+      <span className="pt-0.5"><Checkbox checked={checked} onChange={onChange} aria-label={label} /></span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">{label}</span>
+        {hint && <span className="block text-xs leading-snug text-slate-500 dark:text-slate-400">{hint}</span>}
+      </span>
+    </div>
   );
 }
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
-  <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/40">
-    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{title}</div>
+  <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-800/30">
+    <div className="text-sm font-black text-slate-800 dark:text-slate-100">{title}</div>
     {children}
   </div>
 );
@@ -179,11 +187,9 @@ function RankingSection({ rule, onChange, option, inherited }: {
       <p className="text-xs text-slate-500 dark:text-slate-400">
         Points per league or group match: they order the tables{rule.include_match_points ? ' and are added to the overall table' : ''}. Configure stages can still set them per stage.
       </p>
-      <Select className="w-full max-w-sm" value={own ? 'own' : 'inherit'}
-        onChange={(e) => onChange({ ...rule, ranking: e.target.value === 'own' ? { win: points.win, draw: points.draw, loss: points.loss, ...(sport ? { tiebreakers: order } : {}) } : undefined })}>
-        <option value="inherit">{inheritLabel}</option>
-        <option value="own">Set my own</option>
-      </Select>
+      <PickList className="max-w-md" value={own ? 'own' : 'inherit'} ariaLabel="Match points"
+        onChange={(v) => onChange({ ...rule, ranking: v === 'own' ? { win: points.win, draw: points.draw, loss: points.loss, ...(sport ? { tiebreakers: order } : {}) } : undefined })}
+        options={[{ value: 'inherit', label: inheritLabel }, { value: 'own', label: 'Set my own' }]} />
       {own && (
         <>
           <MatchPointsFields value={own} onChange={(p) => onChange({ ...rule, ranking: { ...own, ...p } })} />
@@ -224,16 +230,16 @@ function RuleForm({ value, onChange, option, inherited }: {
   const discipline = !!option?.sport;
   return (
     <div className="space-y-3">
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">What counts toward the overall table</span>
-        <Select className="w-full max-w-sm" value={choice} onChange={(e) => onChange(ruleForChoice(e.target.value as Choice, value))}>
-          {choices.map((s) => {
+      <div>
+        <span className={FIELD_LABEL}>What counts toward the overall table</span>
+        <PickList className="max-w-md" value={choice} ariaLabel="What counts toward the overall table"
+          onChange={(v) => onChange(ruleForChoice(v as Choice, value))}
+          options={choices.map((s) => {
             // The current choice stays selectable so an existing rule still renders.
             const locked = isLocked(s.value) && s.value !== choice;
-            return <option key={s.value} value={s.value} disabled={locked}>{locked ? `🔒 ${s.label} - not on this plan` : s.label}</option>;
-          })}
-        </Select>
-      </label>
+            return { value: s.value, label: s.label, disabled: locked, hint: locked ? 'Not on this plan' : undefined };
+          })} />
+      </div>
 
       {value.scheme === 'placement' && (
         <>
@@ -255,7 +261,7 @@ function RuleForm({ value, onChange, option, inherited }: {
             )}
           </div>
           {tableFormat && !value.table_placings && (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+            <p className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
               This is a {option?.format ?? option?.name} draw. Without placings from the table, {value.include_match_points ? 'its teams earn no placing points, only their match points and participation.' : 'its teams earn only the participation point.'}
             </p>
           )}
@@ -266,7 +272,7 @@ function RuleForm({ value, onChange, option, inherited }: {
       {value.scheme === 'league_points' && (
         <>
           <MatchPointsFields value={value} onChange={(p) => onChange({ ...value, ...p })} />
-          <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Tie-breakers, in order</span>
+          <span className={FIELD_LABEL}>Tie-breakers, in order</span>
           <TiebreakerPicker sport={option?.sport} entryType={option?.entry_type} value={value.tiebreakers} onChange={(t) => onChange({ ...value, tiebreakers: t })} />
           {!discipline && (
             <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -300,9 +306,9 @@ function RuleForm({ value, onChange, option, inherited }: {
             <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: [...value.places, 0] })}>+ Add place</Button>
+            <button type="button" className={BTN_SECONDARY} onClick={() => onChange({ ...value, places: [...value.places, 0] })}><Plus size={14} aria-hidden />Add place</button>
             {value.places.length > 1 && (
-              <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}>- Remove last</Button>
+              <button type="button" className={BTN_GHOST} onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}><Minus size={14} aria-hidden />Remove last</button>
             )}
           </div>
           <Check checked={!!value.bestPerSide}
@@ -312,7 +318,7 @@ function RuleForm({ value, onChange, option, inherited }: {
         </>
       )}
 
-      <p className="text-xs text-slate-400 dark:text-slate-500">
+      <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
         {value.scheme === 'custom'
           ? 'Custom points: award championship points to each side after every result, from the Results page. A reminder is sent while a completed match still has no points.'
           : value.scheme === 'ranking'
@@ -337,30 +343,30 @@ function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initi
     [], // recompute touches every scope - refresh all queries
   );
   return (
-    <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Championship default</span>
-        <Badge tone="slate">applies unless overridden</Badge>
-        {!saved && <Badge tone="amber">built-in, not saved</Badge>}
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-[15px] font-black text-slate-900 dark:text-slate-100">Championship default</span>
+        <span className={cn(TAG, 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>Applies unless overridden</span>
+        {!saved && <span className={cn(TAG, 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300')}>Built-in, not saved</span>}
       </div>
       {!saved && (
-        <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           No point system is saved yet, so every match counts {initial.scheme === 'league_points' ? `${initial.win} / ${initial.draw} / ${initial.loss}` : 'as below'} toward the overall table. Pick and save the system this event uses.
         </p>
       )}
       {frozen ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-slate-600 dark:text-slate-300">{ruleSummary(rule)}</p>
-          <Button variant="outline" onClick={() => setFrozen(false)}>Edit</Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-slate-800/40">
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{ruleSummary(rule)}</p>
+          <button type="button" className={BTN_SECONDARY} onClick={() => setFrozen(false)}><Pencil size={13} aria-hidden />Edit</button>
         </div>
       ) : (
         <>
           <RuleForm value={rule} onChange={setRule} inherited={{ from: "each sport's default" }} />
-          <div className="mt-3 flex justify-end">
-            <Button disabled={save.isPending}
+          <div className="mt-4 flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
+            <button type="button" className={BTN_PRIMARY} disabled={save.isPending}
               onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Point system saved'); setFrozen(true); }, onError: (e: any) => toast.error(e.message) })}>
               {save.isPending ? 'Saving…' : 'Save point system'}
-            </Button>
+            </button>
           </div>
         </>
       )}
@@ -394,14 +400,16 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inher
   const frozen = !!override && !editing;
   const showForm = editing || (!override && open);
   return (
-    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+    <div className={cn('rounded-2xl border bg-white p-4 dark:bg-slate-900', override ? 'border-brand-200 dark:border-brand-500/30' : 'border-slate-200 dark:border-slate-800')}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-black text-slate-900 dark:text-slate-100">
               {option.sport ? `${option.sport} · ${option.name}` : option.name}
             </span>
-            {override ? <Badge tone="brand">override</Badge> : <Badge tone="slate">inherits default</Badge>}
+            {override
+              ? <span className={cn(TAG, 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200')}>Custom</span>
+              : <span className={cn(TAG, 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>Follows the default</span>}
           </div>
           {(option.entry_type || option.format) && (
             <div className="mt-0.5 text-xs capitalize text-slate-400 dark:text-slate-500">
@@ -411,32 +419,29 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inher
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {frozen && (
-            <Button variant="outline" onClick={() => openForm(true)} aria-label={`Edit ${option.name} rules`} title="Edit">
-              <Pencil size={14} />
-            </Button>
+            <button type="button" className={BTN_SECONDARY} onClick={() => openForm(true)} aria-label={`Edit ${option.name} rules`}><Pencil size={13} aria-hidden />Edit</button>
           )}
-          {!override && !open && <Button variant="ghost" onClick={() => openForm(false)}>Customize</Button>}
-          {showForm && <Button variant="ghost" onClick={cancel}>Cancel</Button>}
+          {!override && !open && <button type="button" className={BTN_SECONDARY} onClick={() => openForm(false)}><Settings2 size={13} aria-hidden />Customize</button>}
         </div>
       </div>
 
-      {frozen && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{ruleSummary(override!.config, option.sport, option.entry_type)}</p>}
+      {frozen && <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 dark:bg-slate-800/40 dark:text-slate-200">{ruleSummary(override!.config, option.sport, option.entry_type)}</p>}
 
       {showForm && (
         <div className="mt-3">
           <RuleForm value={rule} onChange={setRule} option={option} inherited={inherited} />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" onClick={cancel}>Cancel</Button>
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
             {override && (
-              <Button variant="ghost" disabled={reset.isPending}
-                onClick={() => reset.mutate(undefined, { onSuccess: () => { toast.success('Override removed'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
-                {reset.isPending ? 'Removing…' : 'Reset to default'}
-              </Button>
+              <button type="button" className={cn(BTN_GHOST, 'mr-auto hover:!bg-rose-50 hover:!text-rose-600')} disabled={reset.isPending}
+                onClick={() => reset.mutate(undefined, { onSuccess: () => { toast.success('Back to the default'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
+                <RotateCcw size={13} aria-hidden />{reset.isPending ? 'Removing…' : 'Reset to default'}
+              </button>
             )}
-            <Button disabled={save.isPending}
-              onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Override saved'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
-              {save.isPending ? 'Saving…' : 'Save override'}
-            </Button>
+            <button type="button" className={BTN_GHOST} onClick={cancel}>Cancel</button>
+            <button type="button" className={BTN_PRIMARY} disabled={save.isPending}
+              onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Saved'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
           </div>
         </div>
       )}
@@ -524,11 +529,11 @@ function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
   });
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved ?? EMPTY_TITLES);
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{sport}</span>
-        <Badge tone={draft.enabled ? 'brand' : 'slate'}>{draft.enabled ? 'titles on' : 'event points only'}</Badge>
-        {dirty && <Badge tone="amber">not saved</Badge>}
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[15px] font-black text-slate-900 dark:text-slate-100">{sport}</span>
+        <span className={cn(TAG, draft.enabled ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{draft.enabled ? 'Titles on' : 'Event points only'}</span>
+        {dirty && <span className={cn(TAG, 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300')}>Not saved</span>}
       </div>
       <Check checked={draft.enabled} onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
         label="Convert event points into sport titles"
@@ -536,13 +541,12 @@ function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
       {draft.enabled && summary && (
         <>
           <div className="space-y-1.5">
-            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Which title each event counts toward</div>
+            <div className={FIELD_LABEL}>Which title each event counts toward</div>
             {events.map((e) => (
-              <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800/40">
-                <span className="text-slate-700 dark:text-slate-200">{e.name}</span>
-                <Select className="w-full max-w-xs" value={eventTitleIn(draft, e.id)} onChange={(ev) => setEvent(e.id, ev.target.value as EventTitle)}>
-                  {EVENT_TITLES.map((t) => <option key={t} value={t}>{EVENT_TITLE_LABEL[t]}</option>)}
-                </Select>
+              <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-800/30">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">{e.name}</span>
+                <PickList className="w-full sm:w-56" value={eventTitleIn(draft, e.id)} onChange={(v) => setEvent(e.id, v as EventTitle)} ariaLabel={`Title for ${e.name}`}
+                  options={EVENT_TITLES.map((tt) => ({ value: tt, label: EVENT_TITLE_LABEL[tt] }))} />
               </div>
             ))}
           </div>
@@ -552,15 +556,15 @@ function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
             return (
               <div key={t.group} className="space-y-2">
                 <div className="text-xs text-slate-500 dark:text-slate-400">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">{t.label} title pays</span> · {plural(t.events.length, 'event')}
+                  <span className="font-black text-slate-800 dark:text-slate-100">{t.label} title pays</span> · {plural(t.events.length, 'event')}
                 </div>
                 <div className="flex flex-wrap items-end gap-3">
                   {p.places.map((v, i) => (
                     <NumberField key={i} label={ordinal(i + 1)} value={v} onChange={(n) => setTitle(t.name, { places: p.places.map((x, j) => (j === i ? n : x)) })} />
                   ))}
                   <NumberField label="Others" value={p.participation} onChange={(n) => setTitle(t.name, { participation: n })} />
-                  <Button size="sm" variant="ghost" onClick={() => setTitle(t.name, { places: [...p.places, 0] })}>+ Add place</Button>
-                  {p.places.length > 1 && <Button size="sm" variant="ghost" onClick={() => setTitle(t.name, { places: p.places.slice(0, -1) })}>- Remove last</Button>}
+                  <button type="button" className={BTN_SECONDARY} onClick={() => setTitle(t.name, { places: [...p.places, 0] })}><Plus size={14} aria-hidden />Add place</button>
+                  {p.places.length > 1 && <button type="button" className={BTN_GHOST} onClick={() => setTitle(t.name, { places: p.places.slice(0, -1) })}><Minus size={14} aria-hidden />Remove last</button>}
                 </div>
               </div>
             );
@@ -568,27 +572,34 @@ function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
           <p className="text-xs text-slate-400 dark:text-slate-500">Level totals are split by more golds, then more silvers; still level, they share the better place.</p>
         </>
       )}
-      <div className="flex justify-end">
-        <Button size="sm" disabled={save.isPending || !dirty}
+      <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
+        <button type="button" className={BTN_PRIMARY} disabled={save.isPending || !dirty} title={!dirty ? 'Nothing to save' : undefined}
           onClick={() => save.mutate(body(), { onSuccess: () => toast.success(`${sport} titles saved`), onError: (e: any) => toast.error(e.message) })}>
           {save.isPending ? 'Saving…' : 'Save'}
-        </Button>
+        </button>
       </div>
     </div>
   );
 }
 
-export function StandingsRulesCard({ eventId }: { eventId: string }) {
+export type RulesSection = 'default' | 'format' | 'discipline' | 'titles';
+
+export function StandingsRulesCard({ eventId, section: controlled }: {
+  eventId: string;
+  /** Set by a page that has its own navigation: show just this section, no header or tabs. */
+  section?: RulesSection;
+}) {
   const plan = useEventPlan(eventId);
+  // One section at a time: the default, then overrides by format or discipline, then titles.
+  const [ownSection, setSection] = useUrlState<string>('points', 'default');
+  const section = controlled ?? ownSection;
   const lockedChoice = (c: Choice) =>
     (c === 'custom' && !plan.has('custom_points'))
     || ((c === 'both' || c === 'league_points' || c === 'medal') && !plan.has('standard_points'));
   const { data, isLoading } = useApi<RulesResponse>(`/championships/${eventId}/standings-rules`);
 
   if (isLoading || !data) {
-    return (
-      <Card><CardHeader title="Point System" /><CardBody><Spinner /></CardBody></Card>
-    );
+    return <div aria-label="Loading" className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />;
   }
 
   const championshipRule = data.rules.find((r) => r.scope_type === 'championship');
@@ -612,47 +623,63 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
   // A Rankings format has nothing to set: its events take their own rule, titles are per sport.
   const matchFormats = data.formats.filter((f) => !isRankingFormatName(f.name));
 
+  const formatOverrides = matchFormats.filter((f) => findOverride('format', f.id)).length;
+  const disciplineOverrides = data.disciplines.filter((d) => findOverride('discipline', d.id)).length;
+  const tabs: Array<{ value: RulesSection; label: string; count?: string }> = [
+    { value: 'default', label: 'Default' },
+    ...(matchFormats.length ? [{ value: 'format' as const, label: 'By format', count: formatOverrides ? `${formatOverrides} custom` : undefined }] : []),
+    ...(data.disciplines.length ? [{ value: 'discipline' as const, label: 'By discipline', count: disciplineOverrides ? `${disciplineOverrides} custom` : undefined }] : []),
+    ...(eventSports.length ? [{ value: 'titles' as const, label: 'Sport titles' }] : []),
+  ];
+  const active: RulesSection = controlled ?? (tabs.some((x) => x.value === section) ? section as RulesSection : 'default');
+  const intro: Record<RulesSection, string> = {
+    default: 'Applies to every match unless a format or discipline sets its own.',
+    format: 'Give a whole format (e.g. Knockout) its own points. Its disciplines follow it unless they override too.',
+    discipline: 'Give one discipline its own points, on top of its format and the default.',
+    titles: 'For sports scored by event ranking: which title each event counts toward, and what each title pays.',
+  };
+
+  const body = (
+    <div className={cn('space-y-2', !controlled && 'p-4')}>
+      {active === 'default' && <DefaultRuleEditor key={JSON.stringify(defaultRule)} eventId={eventId} initial={defaultRule} saved={!!championshipRule} />}
+      {active === 'format' && matchFormats.map((f) => (
+        <ScopeRuleEditor key={f.id} eventId={eventId} scopeType="format" option={f} override={findOverride('format', f.id)} fallback={defaultRule} inherited={defaultInherited} />
+      ))}
+      {active === 'discipline' && data.disciplines.map((d) => (
+        <ScopeRuleEditor key={d.id} eventId={eventId} scopeType="discipline" option={d} override={findOverride('discipline', d.id)} fallback={parentOf(d).rule} inherited={parentOf(d).inherited} />
+      ))}
+      {active === 'titles' && eventSports.map(([sportId, s]) => (
+        <SportTitlesEditor key={sportId} eventId={eventId} sport={s.sport} sportId={sportId} events={s.events} saved={data.sports.find((x) => x.id === sportId)?.titles ?? null} />
+      ))}
+      {((active === 'format' && !matchFormats.length) || (active === 'discipline' && !data.disciplines.length)) && (
+        <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400 dark:border-slate-700">Nothing to set here yet - add disciplines in Setup first.</p>
+      )}
+    </div>
+  );
+  if (controlled) return <LockedChoices.Provider value={lockedChoice}>{body}</LockedChoices.Provider>;
+
   return (
     <LockedChoices.Provider value={lockedChoice}>
-    <Card>
-      <CardHeader
-        title="Point System"
-        subtitle="How completed fixtures become standings points. Set a championship default, then override per format or discipline."
-      />
-      <CardBody className="space-y-5">
-        <DefaultRuleEditor key={JSON.stringify(defaultRule)} eventId={eventId} initial={defaultRule} saved={!!championshipRule} />
-
-        {matchFormats.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By format</h4>
-            {matchFormats.map((f) => (
-              <ScopeRuleEditor key={f.id} eventId={eventId} scopeType="format" option={f} override={findOverride('format', f.id)} fallback={defaultRule} inherited={defaultInherited} />
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-slate-600 dark:text-slate-300">{intro[active]}</p>
+        </div>
+        {tabs.length > 1 && (
+          <div role="tablist" className="no-scrollbar -mx-1 flex max-w-full gap-1 overflow-x-auto px-1">
+            {tabs.map((x) => (
+              <button key={x.value} type="button" role="tab" aria-selected={active === x.value} onClick={() => setSection(x.value)}
+                className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
+                  active === x.value ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')}>
+                {x.label}
+                {x.count && <span className={cn('rounded-full px-1.5 text-[10px] font-bold', active === x.value ? 'bg-white/20' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300')}>{x.count}</span>}
+              </button>
             ))}
           </div>
         )}
-
-        {data.disciplines.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By discipline</h4>
-            {data.disciplines.map((d) => (
-              <ScopeRuleEditor key={d.id} eventId={eventId} scopeType="discipline" option={d} override={findOverride('discipline', d.id)} fallback={parentOf(d).rule} inherited={parentOf(d).inherited} />
-            ))}
-          </div>
-        )}
-
-        {eventSports.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Sport titles (event sports)</h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              For sports scored by event ranking. Choose whether the sport pays titles, which title each event counts toward, and what each title pays.
-            </p>
-            {eventSports.map(([sportId, s]) => (
-              <SportTitlesEditor key={sportId} eventId={eventId} sport={s.sport} sportId={sportId} events={s.events} saved={data.sports.find((x) => x.id === sportId)?.titles ?? null} />
-            ))}
-          </div>
-        )}
-      </CardBody>
-    </Card>
+      </header>
+      {body}
+    </section>
     </LockedChoices.Provider>
   );
 }

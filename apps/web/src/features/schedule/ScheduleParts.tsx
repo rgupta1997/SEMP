@@ -157,7 +157,7 @@ export function SportIcon({ kind, size = 28, className }: { kind: Kit; size?: nu
  * Faint line-drawn sports kit behind the banner: purely decorative. A wide layout
  * anchored right (the headline stays clean) and a compact one for a phone.
  */
-function SportsDecor() {
+export function SportsDecor() {
   return (
     <>
       <svg className="pointer-events-none absolute inset-0 hidden h-full w-full text-white/[0.09] sm:block" viewBox="0 0 1400 220" preserveAspectRatio="xMaxYMid slice" {...SVG_PROPS}>
@@ -281,7 +281,7 @@ export function ViewTabs<T extends string>({ value, onChange, options, size = 'm
         const Icon = o.icon;
         return (
           <button key={o.value} type="button" role="tab" aria-selected={active} onClick={() => onChange(o.value)}
-            className={cn('flex items-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
+            className={cn('flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
               size === 'sm' ? 'px-3 py-1 text-[13px]' : 'px-4 py-1.5 text-sm',
               active ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500' : 'text-slate-600 hover:bg-slate-50 hover:text-brand-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-brand-300')}>
             {Icon && <Icon size={size === 'sm' ? 14 : 15} aria-hidden />}{o.label}{o.badge}
@@ -345,7 +345,13 @@ export function TeamChips({ sides, value, onChange }: { sides: TeamSide[]; value
 }
 
 /** Sports as multi-select filter chips with live dots; "All sports" first clears them. */
-export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2 }: {
+export function SportChips({ sports, value, onChange, allLabel = 'All sports', allIcon = '🏟️', label = 'Filter by sport', minItems = 2, showCounts = true, wrap = false, allTotal: allTotalOverride }: {
+  /** Flow onto several rows (inside a filter panel) instead of one scrolling row. */
+  wrap?: boolean;
+  /** The All chip's count when summing per-sport counts would double-count (an event runs several sports). */
+  allTotal?: number;
+  /** Off where a match count means nothing (Standings). */
+  showCounts?: boolean;
   sports: Array<{ id: string; name: string; icon?: string | null; live: number; total: number }>;
   /** The picked ids; empty means all. */
   value: string[]; onChange: (ids: string[]) => void;
@@ -356,7 +362,7 @@ export function SportChips({ sports, value, onChange, allLabel = 'All sports', a
 }) {
   if (sports.length < minItems) return null;
   const allLive = sports.reduce((n, s) => n + s.live, 0);
-  const allTotal = sports.reduce((n, s) => n + s.total, 0);
+  const allTotal = allTotalOverride ?? sports.reduce((n, s) => n + s.total, 0);
   const chip = (id: string, label: string, icon: ReactNode, live: number, total: number) => {
     const active = id ? value.includes(id) : value.length === 0;
     // A sport toggles in or out of the set; "All sports" empties it.
@@ -371,12 +377,12 @@ export function SportChips({ sports, value, onChange, allLabel = 'All sports', a
         {label}
         {live > 0
           ? <span className={cn('flex items-center gap-1 rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300')}><LiveDot className="h-1.5 w-1.5" />{live}</span>
-          : <span className={cn('rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{total}</span>}
+          : showCounts && <span className={cn('rounded-full px-1.5 text-[11px] font-bold', active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')}>{total}</span>}
       </button>
     );
   };
   return (
-    <nav aria-label={label} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+    <nav aria-label={label} className={cn('flex gap-2', wrap ? 'flex-wrap' : '-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]')}>
       {chip('', allLabel, allIcon, allLive, allTotal)}
       {sports.map((s) => chip(s.id, s.name, s.icon || '🏅', s.live, s.total))}
     </nav>
@@ -764,8 +770,154 @@ export function SportSectionSkeleton({ cards = 3 }: { cards?: number }) {
   );
 }
 
-/** Schedule or Results, before anything has loaded. */
-export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' }) {
+/** Standings: the podium hero (`hero`), or the leaderboard rows. */
+export function StandingsBoardSkeleton({ hero = false, rows = 8 }: { hero?: boolean; rows?: number }) {
+  if (hero) {
+    return (
+      <div aria-hidden className="flex animate-pulse flex-col gap-5 rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 px-5 pt-5 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-2.5 pb-6"><span className="block h-2.5 w-36 rounded bg-white/25" /><span className="block h-8 w-40 rounded bg-white/30" /><span className="block h-3.5 w-64 max-w-full rounded bg-white/20" /><span className="block h-2.5 w-48 rounded bg-white/20" /></div>
+        <div className="flex items-end justify-center gap-3 md:w-[26rem]">
+          {['h-16 sm:h-20', 'h-24 sm:h-28', 'h-11 sm:h-14'].map((h, i) => (
+            <div key={i} className="flex w-1/3 flex-col items-center gap-1.5"><span className="block h-10 w-10 rounded-full bg-white/25" /><span className="block h-3 w-12 rounded bg-white/20" /><span className={cn('mt-1 block w-full rounded-t-xl bg-white/10', h)} /></div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div aria-hidden>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 dark:border-slate-800">
+          <Skel className="h-6 w-6 rounded-full" /><Skel className="h-9 w-9 rounded-full" />
+          <div className="flex-1 space-y-1.5"><Skel className="h-3.5 w-44 max-w-[60%]" /><Skel className="h-3 w-32" /></div>
+          <Skel className="hidden h-3 w-16 sm:block" /><Skel className="h-6 w-10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Participants: banner, chips, toolbar and a few organisation cards. */
+export function ParticipantsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      <div aria-hidden className="flex animate-pulse flex-col gap-5 rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 p-4 sm:p-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2.5"><span className="block h-2.5 w-24 rounded bg-white/25" /><span className="block h-9 w-44 rounded bg-white/30" /><span className="block h-3.5 w-60 max-w-full rounded bg-white/20" /><span className="block h-1.5 w-64 max-w-full rounded-full bg-white/20" /></div>
+        <div className="space-y-3">
+          <div className="flex md:justify-end">{Array.from({ length: 6 }, (_, i) => <span key={i} className="-ml-2 block h-9 w-9 rounded-full bg-white/25 ring-2 ring-brand-700 first:ml-0" />)}</div>
+          <div className="flex gap-2">{['w-28', 'w-28', 'w-32'].map((w, i) => <span key={i} className={cn('block h-8 rounded-full bg-white/10 ring-1 ring-white/15', w)} />)}</div>
+        </div>
+      </div>
+      <ChipsSkeleton />
+      <div className="flex flex-wrap gap-2"><Skel className="h-9 w-72 max-w-full rounded-lg" /><Skel className="h-9 w-48 rounded-lg" /></div>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} aria-hidden className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900">
+          <Skel className="h-9 w-9 rounded-full" />
+          <div className="flex-1 space-y-1.5"><Skel className="h-3.5 w-52 max-w-[70%]" /><Skel className="h-2.5 w-32" /></div>
+          <Skel className="hidden h-6 w-24 rounded-full sm:block" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Organising team: hero, then the tabbed card of people. */
+export function TeamSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      <div aria-hidden className="flex animate-pulse flex-col gap-5 rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 p-4 sm:p-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2.5"><span className="block h-2.5 w-28 rounded bg-white/25" /><span className="block h-9 w-56 max-w-full rounded bg-white/30" /><span className="block h-3.5 w-40 rounded bg-white/20" /><span className="block h-1.5 w-64 max-w-full rounded-full bg-white/20" /></div>
+        <div className="space-y-3">
+          <div className="flex md:justify-end">{Array.from({ length: 7 }, (_, i) => <span key={i} className="-ml-2 block h-9 w-9 rounded-full bg-white/25 ring-2 ring-brand-700 first:ml-0" />)}</div>
+          <div className="flex gap-2">{['w-36', 'w-36'].map((w, i) => <span key={i} className={cn('block h-8 rounded-full bg-white/10 ring-1 ring-white/15', w)} />)}</div>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800"><Skel className="h-8 w-56 rounded-full" /><Skel className="ml-auto hidden h-9 w-64 rounded-full sm:block" /></div>
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="flex items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 dark:border-slate-800">
+            <Skel className="h-8 w-8 rounded-full" /><Skel className="h-3.5 w-40 max-w-[40%]" /><Skel className="hidden h-5 w-24 rounded-full sm:block" /><Skel className="ml-auto h-3 w-24" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Event setup: slim header, then the checklist beside the open step. */
+export function SetupSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      <div aria-hidden className="flex animate-pulse items-center justify-between rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 px-5 py-4">
+        <div className="space-y-2"><span className="block h-2.5 w-24 rounded bg-white/25" /><span className="block h-6 w-64 max-w-full rounded bg-white/30" /><span className="block h-2.5 w-36 rounded bg-white/20" /></div>
+        <span className="block h-8 w-28 rounded-full bg-white/30" />
+      </div>
+      <div className="hidden grid-cols-4 divide-x divide-slate-100 rounded-2xl border border-slate-200 bg-white sm:grid dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        {Array.from({ length: 4 }, (_, i) => <div key={i} className="flex items-center gap-3 p-3"><Skel className="h-8 w-8 rounded-full" /><div className="flex-1 space-y-1.5"><Skel className="h-3.5 w-24" /><Skel className="h-2.5 w-28 max-w-full" /></div></div>)}
+      </div>
+      <div>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3"><Skel className="h-10 w-10 rounded-xl" /><div className="space-y-1.5"><Skel className="h-4 w-40" /><Skel className="h-3 w-72 max-w-full" /></div></div>
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} aria-hidden className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+              <Skel className="h-11 w-11 rounded-2xl" /><div className="flex-1 space-y-1.5"><Skel className="h-4 w-32" /><Skel className="h-3 w-52 max-w-[70%]" /></div><Skel className="h-8 w-8 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Event overview: the hero with its scoreboard, then the two columns of cards. */
+export function OverviewSkeleton() {
+  const card = (rows: number, key: number) => (
+    <div key={key} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center gap-2.5"><Skel className="h-8 w-8 rounded-xl" /><Skel className="h-3.5 w-36" /></div>
+      {Array.from({ length: rows }, (_, i) => <Skel key={i} className="h-10 w-full rounded-xl" />)}
+    </div>
+  );
+  return (
+    <div role="status" aria-label="Loading" className="space-y-5">
+      <div aria-hidden className="animate-pulse rounded-2xl bg-gradient-to-br from-brand-600/90 via-brand-700/90 to-brand-900/90 p-4 sm:p-5">
+        <div className="space-y-2.5"><span className="block h-2.5 w-20 rounded bg-white/25" /><span className="block h-8 w-80 max-w-full rounded bg-white/30" /><span className="block h-4 w-56 rounded bg-white/20" /></div>
+        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-white/10 sm:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => <div key={i} className="space-y-1.5 p-4"><span className="block h-2 w-14 rounded bg-white/20" /><span className="block h-6 w-10 rounded bg-white/30" /><span className="block h-2.5 w-20 rounded bg-white/15" /></div>)}
+        </div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="space-y-5">{card(4, 1)}{card(2, 2)}</div>
+        <div className="space-y-5">{card(2, 3)}{card(3, 4)}</div>
+      </div>
+    </div>
+  );
+}
+
+const CHIP_WIDTHS = ['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'];
+const ChipsSkeleton = () => (
+  <div className="flex gap-2 overflow-hidden">
+    {CHIP_WIDTHS.map((w, i) => <Skel key={i} className={cn('h-9 shrink-0 rounded-full', w)} />)}
+  </div>
+);
+
+/** Schedule, Results or Standings, before anything has loaded. */
+export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' | 'standings' }) {
+  if (kind === 'standings') {
+    return (
+      <div role="status" aria-label="Loading" className="space-y-5">
+        <StandingsBoardSkeleton hero />
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800"><Skel className="h-4 w-24" /><Skel className="h-7 w-32 rounded-lg" /></div>
+            <StandingsBoardSkeleton />
+          </div>
+          <div className="hidden space-y-2 rounded-2xl border border-slate-200 bg-white p-3 xl:block dark:border-slate-800 dark:bg-slate-900">
+            {Array.from({ length: 9 }, (_, i) => <Skel key={i} className="h-7 w-full rounded-lg" />)}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div role="status" aria-label="Loading" className="space-y-5">
       {kind === 'schedule' && <Skel className="h-9 w-56 rounded-full" />}
@@ -778,12 +930,9 @@ export function PageSkeleton({ kind }: { kind: 'schedule' | 'results' }) {
           {Array.from({ length: 4 }, (_, i) => <Skel key={i} className="h-36 w-64 shrink-0 rounded-xl" />)}
         </div>
       )}
-      <div className="flex gap-2 overflow-hidden">
-        {['w-28', 'w-24', 'w-28', 'w-24', 'w-24', 'w-20', 'w-28'].map((w, i) => <Skel key={i} className={cn('h-9 shrink-0 rounded-full', w)} />)}
-      </div>
+      <ChipsSkeleton />
       <SportSectionSkeleton />
       <SportSectionSkeleton cards={2} />
     </div>
   );
 }
-

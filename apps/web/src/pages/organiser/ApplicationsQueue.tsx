@@ -1,9 +1,15 @@
 import { useState } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, X } from 'lucide-react';
+import { PillButton, TeamAvatar } from '../../features/schedule/ScheduleParts';
+import { HEAD_ROW } from '../../components/GroupTables';
 import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
-import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast , FilterChips} from '../../components/ui';
+import { BulkBar, Button, Checkbox, EmptyState, Modal, PillPagination, SearchInput, StatusBadge, cn, toast, FilterChips } from '../../components/ui';
 import { APPLICATION_STATUS, INVITE_BUCKET, INVITE_FILTER_OPTIONS, type InviteFilter } from '../../lib/inviteStatus';
+
+// Select · Organisation · Applied · Status · Actions
+const APP_GRID = '1.25rem minmax(0,1.6fr) 8.5rem minmax(0,1fr) 13rem';
 
 // Organisations that APPLIED to an open championship, and the approve/reject queue
 // for them.
@@ -97,21 +103,28 @@ export function ApplicationsQueue({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterChips
-          className="mb-0"
-          value={filter}
-          onChange={(f) => { onFilterChange(f); setSelected(new Set()); }}
-          options={INVITE_FILTER_OPTIONS
-            .map((f) => ({ key: f, label: <span className="capitalize">{f}</span>, count: f === 'all' ? undefined : counts[f] }))}
-        />
-        <ListToolbar inline className="ml-auto flex-1 justify-end">
-          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search organization…" className="w-full sm:w-56" />
-          <Button size="sm" variant="outline" onClick={() => t.setSortKey(t.sortKey === 'name' ? 'applied' : 'name')}>
-            Sort: {t.sortKey === 'name' ? 'Name' : 'Applied'}
-          </Button>
-          <SortDirButton dir={t.dir} onToggle={() => t.setDir(t.dir === 'asc' ? 'desc' : 'asc')} />
-        </ListToolbar>
+      {/* Phone: filter and sort share a row, search below at full width.
+          sm+: one row, the inner wrapper dissolving into it. */}
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex items-center justify-between gap-2 sm:contents">
+          <FilterChips
+            className="mb-0"
+            value={filter}
+            onChange={(f) => { onFilterChange(f); setSelected(new Set()); }}
+            options={INVITE_FILTER_OPTIONS
+              .map((f) => ({ key: f, label: <span className="capitalize">{f}</span>, count: f === 'all' ? undefined : counts[f] }))}
+          />
+          <div className="flex shrink-0 items-center gap-1.5 sm:order-last">
+            <PillButton icon={ArrowUpDown} onClick={() => t.setSortKey(t.sortKey === 'name' ? 'applied' : 'name')} title="Sort by">
+              {t.sortKey === 'name' ? 'Name' : 'Applied'}
+            </PillButton>
+            <PillButton icon={t.dir === 'asc' ? ArrowUp : ArrowDown} onClick={() => t.setDir(t.dir === 'asc' ? 'desc' : 'asc')}
+              title={t.dir === 'asc' ? 'Sort ascending' : 'Sort descending'}>
+              {t.dir === 'asc' ? 'Asc' : 'Desc'}
+            </PillButton>
+          </div>
+        </div>
+        <SearchInput pill value={t.query} onChange={t.setQuery} placeholder="Search organization…" className="w-full sm:ml-auto sm:w-56" />
       </div>
 
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
@@ -130,50 +143,70 @@ export function ApplicationsQueue({
       </BulkBar>
 
       {isLoading ? null : t.total === 0 && invitesEmpty ? (
-        <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === INVITE_BUCKET.PENDING ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
+        <EmptyState icon={<CheckCircle2 size={24} />} title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === INVITE_BUCKET.PENDING ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
       ) : t.total === 0 ? null : (
-        <Table>
-          <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <tr>
-              <th className="px-4 py-3 w-px"><Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} /></th>
-              <th className="px-4 py-3">Organization</th>
-              <th className="px-4 py-3">Applied</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((r) => (
-              <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${selected.has(r.id) ? 'bg-brand-50/50' : ''}`}>
-                <td className="px-4 py-3"><Checkbox checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={r.organizations?.name} size={34} />
-                    <div>
-                      <div className="font-medium text-slate-800 dark:text-slate-200">{r.organizations?.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{[r.organizations?.code, r.organizations?.city].filter(Boolean).join(' · ') || '-'}</div>
-                    </div>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          {/* Desktop headings share the rows' grid. */}
+          <div className={cn('hidden items-center gap-x-4 px-4 py-2 lg:grid', HEAD_ROW)} style={{ gridTemplateColumns: APP_GRID }}>
+            <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} aria-label="Select all" />
+            <span>Organisation</span><span>Applied</span><span>Status</span><span className="text-right">Actions</span>
+          </div>
+          <ul>
+            {visible.map((r) => {
+              const name = r.organizations?.name ?? 'Organisation';
+              const meta = [r.organizations?.code, r.organizations?.city].filter(Boolean).join(' · ');
+              const on = selected.has(r.id);
+              const actions = (
+                <span className="flex shrink-0 items-center justify-end gap-1.5">
+                  {r.status !== APPLICATION_STATUS.APPROVED && (
+                    <PillButton icon={Check} tone="primary" onClick={() => review.mutate({ id: r.id, status: APPLICATION_STATUS.APPROVED })} disabled={review.isPending || readOnly} title={readOnlyTitle}>Approve</PillButton>
+                  )}
+                  {r.status !== APPLICATION_STATUS.REJECTED && (
+                    <PillButton icon={X} onClick={() => setRejecting(r)} disabled={readOnly} title={readOnlyTitle}>Reject</PillButton>
+                  )}
+                </span>
+              );
+              const who = (
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <TeamAvatar name={name} short={r.organizations?.short_name ?? r.organizations?.code} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-slate-800 dark:text-slate-100" title={name}>{name}</span>
+                    {meta && <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{meta}</span>}
+                  </span>
+                </span>
+              );
+              const note = r.status === APPLICATION_STATUS.REJECTED && r.rejection_note
+                ? <span className="block truncate text-xs text-rose-600 dark:text-rose-400" title={r.rejection_note}>“{r.rejection_note}”</span> : null;
+              return (
+                <li key={r.id} className={cn('border-t border-slate-100 transition-colors first:border-t-0 lg:first:border-t dark:border-slate-800',
+                  on ? 'bg-brand-50/60 dark:bg-brand-500/10' : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/30')}>
+                  {/* Desktop: aligned columns. */}
+                  <div className="hidden items-center gap-x-4 px-4 py-2.5 lg:grid" style={{ gridTemplateColumns: APP_GRID }}>
+                    <Checkbox checked={on} onChange={() => toggle(r.id)} aria-label={`Select ${name}`} />
+                    {who}
+                    <span className="text-sm text-slate-500 dark:text-slate-400">{fmtDateTime(r.applied_at)}</span>
+                    <span className="min-w-0"><StatusBadge status={r.status} />{note}</span>
+                    {actions}
                   </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{fmtDateTime(r.applied_at)}</td>
-                <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-3">
-                  <div className="flex justify-end gap-2">
-                    {r.status !== APPLICATION_STATUS.APPROVED && (
-                      <Button size="sm" onClick={() => review.mutate({ id: r.id, status: APPLICATION_STATUS.APPROVED })} disabled={review.isPending || readOnly} title={readOnlyTitle}>Approve</Button>
-                    )}
-                    {r.status !== APPLICATION_STATUS.REJECTED && (
-                      <Button size="sm" variant="outline" onClick={() => setRejecting(r)} disabled={readOnly} title={readOnlyTitle}>Reject</Button>
-                    )}
-                    {r.status === APPLICATION_STATUS.REJECTED && r.rejection_note && <Badge tone="rose">{r.rejection_note}</Badge>}
+                  {/* Phone: checkbox and organisation, then status, date and actions. */}
+                  <div className="flex items-start gap-3 px-4 py-3 lg:hidden">
+                    <span className="pt-2"><Checkbox checked={on} onChange={() => toggle(r.id)} aria-label={`Select ${name}`} /></span>
+                    <span className="min-w-0 flex-1 space-y-2">
+                      {who}
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <StatusBadge status={r.status} /><span>Applied {fmtDateTime(r.applied_at)}</span>
+                      </span>
+                      {note}
+                      <span className="flex">{actions}</span>
+                    </span>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
-      {t.total > 0 && <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />}
+      {t.total > 0 && <PillPagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} noun="organisation" className="mt-3" />}
 
       {rejecting && (
         <Modal

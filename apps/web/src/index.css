@@ -417,6 +417,7 @@ select:disabled,
 /* 2. SAFE AREA. Anything pinned to the bottom of a phone sits under the home
       indicator without this. */
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
 .mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
 .bottom-safe { bottom: env(safe-area-inset-bottom, 0px); }
 .h-safe-bottom { height: env(safe-area-inset-bottom, 0px); }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Check } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Check, Scale } from 'lucide-react';
 import { formatPoints, type GroupRanking, type TieResolution } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
@@ -7,9 +7,9 @@ import { Badge, Button, Modal, Spinner, Textarea, cn, toast } from './ui';
 import { TeamAvatar } from '../features/schedule/ScheduleParts';
 
 // Shared table styling, so pools and the cross-group table read the same.
-const CARD = 'min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
-const HEAD_ROW = 'bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800/40 dark:text-slate-500';
-const ROW = 'border-t border-slate-100 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30';
+export const CARD = 'min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
+export const HEAD_ROW = 'bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800/40 dark:text-slate-500';
+export const ROW = 'border-t border-slate-100 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/30';
 
 /** A team in a table: its badge and name. */
 function TeamCell({ name, short }: { name: string; short: string | null }) {
@@ -25,7 +25,7 @@ function Diff({ v }: { v: number }) {
   return <span className={cn('tabular-nums', v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400')}>{v > 0 ? '+' : ''}{formatPoints(v)}</span>;
 }
 /** Points, the column people read first. */
-function Pts({ v }: { v: number }) {
+export function Pts({ v }: { v: number }) {
   return <span className="inline-grid min-w-8 place-items-center rounded-md bg-brand-50 px-1.5 py-0.5 text-[13px] font-black tabular-nums text-brand-700 dark:bg-brand-500/15 dark:text-brand-200">{formatPoints(v)}</span>;
 }
 
@@ -85,20 +85,49 @@ export const openTieCount = (t?: DrawTables) =>
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 
 /** "Point tally" with a yellow dot while a group tie waits for the organiser. Shares the tables' cache. */
-export function TallyTabLabel({ drawId, canManage }: { drawId: string; canManage: boolean }) {
+/** "1 tie" on the Point tally tab while a group tie waits for the organiser. Shares the tables' cache. */
+export function TallyTieBadge({ drawId, canManage, active }: { drawId: string; canManage: boolean; active?: boolean }) {
   const { data } = useApi<DrawTables>(canManage ? tablesPath(drawId) : null, true, { refetchInterval: TABLES_REFRESH_MS });
   const open = canManage ? openTieCount(data) : 0;
+  if (!open) return null;
   return (
-    <span className="relative inline-flex items-center">
-      Point tally
-      {/* Pinned to the corner like a notification badge. */}
-      {open > 0 && (
-        <span className="absolute -right-2.5 -top-1.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-100 dark:ring-slate-800" role="status"
-          aria-label={`${open} tie${open === 1 ? '' : 's'} to resolve`} title={`${open} tie${open === 1 ? '' : 's'} to resolve`} />
-      )}
+    <span role="status" title={`${open} tie${open === 1 ? '' : 's'} to resolve`}
+      className={cn('inline-flex items-center gap-1 rounded-full px-1.5 text-[10px] font-black', active ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200')}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', active ? 'bg-white' : 'bg-amber-500')} aria-hidden />{open} tie{open === 1 ? '' : 's'}
     </span>
   );
 }
+
+/** "A, B and C". */
+const joinAnd = (list: string[]) => (list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
+
+/**
+ * A tie in a table: who, why they can't be split, and one pill to order them.
+ * Amber when something waits on it; grey when it changes nothing but can still be ordered.
+ */
+function TieNotice({ waiting, title, text, action, onAction }: { waiting: boolean; title: string; text: string; action?: string; onAction?: () => void }) {
+  return (
+    <div className={cn('flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 sm:flex-nowrap',
+      waiting ? 'border-amber-200 bg-amber-50/80 dark:border-amber-500/30 dark:bg-amber-500/10' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40')}>
+      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-full',
+        waiting ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' : 'bg-slate-200/70 text-slate-500 dark:bg-slate-700 dark:text-slate-300')} aria-hidden>
+        <Scale size={15} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className={cn('text-[13px] font-black', waiting ? 'text-amber-900 dark:text-amber-100' : 'text-slate-700 dark:text-slate-200')}>{title}</div>
+        <div className={cn('text-xs leading-snug', waiting ? 'text-amber-800/90 dark:text-amber-200/90' : 'text-slate-500 dark:text-slate-400')}>{text}</div>
+      </div>
+      {action && onAction && (
+        <button type="button" onClick={onAction}
+          className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-[13px] font-semibold shadow-sm transition max-sm:ml-11 dark:bg-slate-900',
+            waiting ? 'border-amber-300 text-amber-800 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-200' : 'border-slate-200 text-slate-700 hover:border-brand-300 hover:text-brand-700 dark:border-slate-700 dark:text-slate-200')}>
+          {action}<ArrowRight size={13} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
 
 interface TieTarget { scope: 'pool' | 'placing'; stage: number; pool: number | null; entities: string[]; title: string }
 
@@ -324,21 +353,21 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
       {showAdt && pool.rows.some((r) => r.adt_estimated) && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
       )}
-      {pool.ties.map((t) => {
-        // A tie nothing depends on is a grey note, not a warning; it can still be ordered.
-        const open = openTiesOf(pool).some((o) => o.join() === t.join());
-        return (
-          <div key={t.join()} className={cn('flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs',
-            open ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
-              : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400')}>
-            <span>
-              Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {inSentence(ranking.labels.join(', '))}.
-              {!open && ' This does not change who goes through or anyone\'s points.'}
-            </span>
-            {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>{open ? 'Resolve' : 'Set order'}</Button>}
-          </div>
-        );
-      })}
+      {pool.ties.length > 0 && (
+        <div className="space-y-2 border-t border-slate-100 p-3 dark:border-slate-800">
+          {pool.ties.map((t) => {
+            // A tie nothing depends on is a grey note, not a warning; it can still be ordered.
+            const open = openTiesOf(pool).some((o) => o.join() === t.join());
+            const who = joinAnd(t.map((id) => names[id] ?? id));
+            return (
+              <TieNotice key={t.join()} waiting={open}
+                title={`${who} are tied`}
+                text={`Level on ${inSentence(ranking.labels.join(', '))}. ${open ? 'Pick their order to settle the table.' : 'This does not change who goes through or anyone\'s points.'}`}
+                action={canManage ? (open ? 'Pick order' : 'Set order') : undefined} onAction={() => onResolve(t)} />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -380,12 +409,11 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
       )}
 
       {data.placing_ties.map((t) => (
-        <div key={t.entities.join()} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-          <span>
-            {t.entities.map((id) => data.names[id] ?? id).join(' and ')} are level and share {ordinal(t.from)} place, with its points each. To split them instead, set an order.
-          </span>
-          {canManage && <Button size="sm" variant="outline" onClick={() => setTarget({ scope: 'placing', stage: t.stage, pool: null, entities: t.entities, title: `Order ${ordinal(t.from)} place` })}>Set order</Button>}
-        </div>
+        <TieNotice key={t.entities.join()} waiting={false}
+          title={`${joinAnd(t.entities.map((id) => data.names[id] ?? id))} share ${ordinal(t.from)} place`}
+          text="They are level, so each gets that place's points. To split them instead, set an order."
+          action={canManage ? 'Set order' : undefined}
+          onAction={() => setTarget({ scope: 'placing', stage: t.stage, pool: null, entities: t.entities, title: `Order ${ordinal(t.from)} place` })} />
       ))}
 
       {data.resolutions.length > 0 && (

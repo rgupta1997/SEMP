@@ -3,34 +3,33 @@ import { BrandMark } from './BrandMark';
 import { SPORT_ICON_KINDS, SportIcon } from '../features/schedule/ScheduleParts';
 
 // The full-screen loader on a page refresh: a small sport line icon that changes,
-// a slim bar, and one line of a sports quote. Only the app's first load uses it.
+// a slim bar, and a short line about what is loading. Only the app's first load uses it.
 
-const QUOTES: Array<[string, string]> = [
-  ['The more difficult the victory, the greater the happiness in winning.', 'Pelé'],
-  ['You miss 100% of the shots you don\'t take.', 'Wayne Gretzky'],
-  ['I\'ve failed over and over again in my life. And that is why I succeed.', 'Michael Jordan'],
-  ['People throw stones at you and you convert them into milestones.', 'Sachin Tendulkar'],
-  ['Champions keep playing until they get it right.', 'Billie Jean King'],
-  ['It\'s not whether you get knocked down, it\'s whether you get up.', 'Vince Lombardi'],
-  ['Hard work beats talent when talent doesn\'t work hard.', 'Tim Notke'],
+const LINES = [
+  'Getting your events ready…',
+  'Loading fixtures and results…',
+  'Updating the standings…',
+  'Checking live scores…',
+  'Setting up your dashboard…',
+  'Almost there…',
 ];
 const ICON_MS = 900;
-const QUOTE_MS = 4000;
+const LINE_MS = 2500;
 
 export function SportsLoader({ notice }: {
   /** A status note (e.g. "can't reach the server"), pinned to the bottom of the screen. */
   notice?: ReactNode;
 }) {
   const [icon, setIcon] = useState(0);
-  const [quote, setQuote] = useState(() => Math.floor(Math.random() * QUOTES.length));
+  const [line, setLine] = useState(0);
   useEffect(() => {
-    // Still under reduced motion: one icon, one quote.
+    // Still under reduced motion: one icon, one line.
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const a = setInterval(() => setIcon((i) => (i + 1) % SPORT_ICON_KINDS.length), ICON_MS);
-    const b = setInterval(() => setQuote((q) => (q + 1) % QUOTES.length), QUOTE_MS);
+    // Stops on the last line rather than looping back to the first.
+    const b = setInterval(() => setLine((l) => Math.min(l + 1, LINES.length - 1)), LINE_MS);
     return () => { clearInterval(a); clearInterval(b); };
   }, []);
-  const [text, by] = QUOTES[quote];
 
   return (
     <div role="status" aria-label="Loading Sportagon" className="grid h-screen h-dvh place-items-center bg-[var(--canvas)] px-6 dark:bg-slate-950">
@@ -47,8 +46,8 @@ export function SportsLoader({ notice }: {
         <div className="mt-4 h-0.5 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden>
           <span className="sl-anim block h-full w-2/5 rounded-full bg-brand-600 dark:bg-brand-400" style={{ animation: 'sl-bar 1.1s ease-in-out infinite' }} />
         </div>
-        <p key={`quote-${quote}`} className="sl-anim mt-5 text-[13px] leading-snug text-slate-500 dark:text-slate-400" style={{ animation: 'sl-in .5s ease-out both' }}>
-          “{text}” <span className="whitespace-nowrap font-semibold text-slate-600 dark:text-slate-300">- {by}</span>
+        <p key={`line-${line}`} className="sl-anim mt-5 text-[13px] font-medium text-slate-500 dark:text-slate-400" style={{ animation: 'sl-in .4s ease-out both' }}>
+          {LINES[line]}
         </p>
         <div className="mt-8 opacity-60"><BrandMark height={16} /></div>
       </div>

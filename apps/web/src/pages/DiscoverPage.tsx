@@ -1,12 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight, Compass, Lock, MapPin } from 'lucide-react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
 import { citiesLabel, citiesShort, hostCitiesFor, ORG_ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
-import { Button, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, SURFACE, toast } from '../components/ui';
+import { usePageTitle } from '../lib/pageTitle';
+import { eventStatusLook } from '../lib/eventStatus';
+import { Button, EmptyState, Field, Input, Modal, PillPagination, SearchInput, cn, toast } from '../components/ui';
+import { PickList } from '../components/PickList';
+import { ViewTabs } from '../features/schedule/ScheduleParts';
+import { SportFilterButton, SportFilterPanel, useSportIcon, useSportOptions } from '../features/personal/SportFilter';
+import { PosterSkeleton } from '../features/personal/EventSkeletons';
+import { PERSONAL_NAVY, PILL_BRAND, PILL_TEAL } from '../features/personal/styles';
 
 interface Championship {
   id: string; name: string; slug: string; status: string;
@@ -23,51 +31,53 @@ interface OrgMembership {
   organization?: { name?: string; short_name?: string; archived_at?: string | null } | null;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft', registration_open: 'Registration open', ongoing: 'Live', completed: 'Completed',
+/** Status tabs, in the order someone browsing cares about. */
+const STATUS_ORDER = ['registration_open', 'ongoing', 'completed', 'draft'];
+
+/** An application's state, as a chip. */
+const APPLIED_CHIP: Record<string, string> = {
+  approved: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200',
+  pending: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200',
+  rejected: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200',
 };
 
 /**
  * Who may enter an organisation into an event: an active owner or admin.
- *
- * The same test the enroll guard makes on the server, mirrored here for the UX - an
- * org role GRANT (Sports Admin) is not a membership role, so it opens Discover
- * without opening this.
+ * The same test the enroll guard makes on the server; an org role GRANT (Sports Admin) does not count.
  */
 const canEnter = (m: OrgMembership) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin');
 
 const orgLabel = (m?: OrgMembership) => m?.organization?.short_name ?? m?.organization?.name ?? 'your organisation';
 
+const DAY = 864e5;
+const dayOf = (iso: string) => { const d = new Date(iso); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
 /**
- * Everything that goes stale the moment an application exists.
- *
- * Query keys are full URLs; refresh every /me/enrollments* variant (the Discover list
- * uses ?scope=all) so the CTA flips to "Your application" immediately.
- *
- * These calls go straight through api() rather than useApiMutation(), so they never
- * reach the app-wide MutationCache fallback in main.tsx that normally auto-invalidates
- * everything (including notifications) after a mutation with no explicit
- * meta.invalidate. Enrolling can make an already-existing notification (e.g.
- * "Registration is open", posted before this org had any relationship to the
- * championship) newly visible to this user, so the bell badge needs an explicit nudge
- * here too, or it silently sits stale until something unrelated happens to open the
- * notification drawer and invalidate it as a side effect.
+ * A note on the event's dates that agrees with its status: "Starts in 3 days", "Ends tomorrow".
+ * The organiser sets the status, so dates that ran out under a live event are flagged, not called "Ended".
+ */
+function timing(c: Championship): { text: string; warn?: boolean } | null {
+  if (c.status === 'completed') return null; // the status already says it
+  const today = dayOf(new Date().toISOString());
+  const start = dayOf(c.start_date); const end = dayOf(c.end_date);
+  const days = (n: number, word: string) => (n === 0 ? `${word} today` : n === 1 ? `${word} tomorrow` : `${word} in ${n} days`);
+  if (today < start) return { text: days(Math.round((start - today) / DAY), 'Starts') };
+  if (today <= end) return { text: days(Math.round((end - today) / DAY), 'Ends') };
+  return { text: 'Past end date', warn: true };
+}
+
+/**
+ * Everything that goes stale the moment an application exists: every /me/enrollments
+ * variant, and the bell. These calls skip useApiMutation, so nothing invalidates them for us.
  */
 async function refreshAfterEnroll(qc: QueryClient) {
   await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/me/enrollments') });
   await qc.invalidateQueries({ queryKey: ['notifications'] });
 }
 
-// Apply to participate FROM MY SPACE - pick which of your organizations to apply as,
-// or create one on the fly. Players with no organization land straight in "create"
-// mode, so anyone can apply directly to a championship.
-//
-// This popup only exists in personal space. An organisation workspace has already
-// answered the question it asks.
-function ApplyModal({ championship, onClose }: {
-  championship: Championship;
-  onClose: () => void;
-}) {
+// Apply FROM MY SPACE: pick which of your organisations to apply as, or create one.
+// Only personal space shows this; an organisation workspace has already answered it.
+function ApplyModal({ championship, onClose }: { championship: Championship; onClose: () => void }) {
   const { ctx, refresh } = useAuth();
   const qc = useQueryClient();
   const myOrgs = useMemo(
@@ -106,20 +116,15 @@ function ApplyModal({ championship, onClose }: {
     <Modal title={`Participate in ${championship.name}`} onClose={onClose}>
       <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Apply as one of your organizations, or create a new one to compete under.</p>
       {myOrgs.length > 0 && (
-        <div className="mb-3 inline-flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-          {(['pick', 'create'] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)}
-              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === m ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>
-              {m === 'pick' ? 'Existing organization' : 'New organization'}
-            </button>
-          ))}
+        <div className="mb-3">
+          <ViewTabs size="sm" value={mode} onChange={setMode}
+            options={[{ value: 'pick', label: 'Existing organization' }, { value: 'create', label: 'New organization' }]} />
         </div>
       )}
       {mode === 'pick' ? (
         <Field label="Apply as">
-          <Select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
-            {myOrgs.map((m) => <option key={m.organization_id} value={m.organization_id}>{m.organization?.name}</option>)}
-          </Select>
+          <PickList value={orgId} onChange={setOrgId} ariaLabel="Apply as"
+            options={myOrgs.map((m) => ({ value: m.organization_id, label: m.organization?.name ?? 'Organisation' }))} />
         </Field>
       ) : (
         <>
@@ -136,34 +141,72 @@ function ApplyModal({ championship, onClose }: {
   );
 }
 
+/** A poster for one event: its window and sports on navy, then name, place, and how to get in. */
+function EventPoster({ c, iconOf, entry }: { c: Championship; iconOf: (s: string) => string; entry: ReactNode }) {
+  const look = eventStatusLook(c.status);
+  const when = timing(c);
+  const sports = c.sports ?? [];
+  // Like sports: the first two cities, then "+N", all of them on hover.
+  const cities = hostCitiesFor(c);
+  return (
+    <article className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
+      <div className={cn('relative overflow-hidden px-4 pb-4 pt-3 text-white', PERSONAL_NAVY)}>
+        {/* Kit stripes, as on My Game's hero. */}
+        <svg aria-hidden viewBox="0 0 200 100" preserveAspectRatio="xMaxYMid slice" className="pointer-events-none absolute inset-0 h-full w-full">
+          <polygon points="120,100 140,100 190,0 170,0" fill="#5CE1E6" opacity=".08" />
+          <polygon points="146,100 152,100 202,0 196,0" fill="#5CE1E6" opacity=".14" />
+        </svg>
+        <div className="relative flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5">
+            <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-sm', look.solid)}>
+              <span className={cn('h-1.5 w-1.5 rounded-full', look.dot, c.status === 'ongoing' && 'animate-pulse')} aria-hidden />{look.label}
+            </span>
+            {c.visibility === 'private' && <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/80 ring-1 ring-white/15"><Lock size={10} aria-hidden />Private</span>}
+          </span>
+          {when && <span className={cn('text-[11px] font-semibold', when.warn ? 'text-amber-300' : 'text-[var(--accent)]')}>{when.text}</span>}
+        </div>
+        <div className="relative mt-2 text-lg font-black tabular-nums">{fmtDateRange(c.start_date, c.end_date)}</div>
+        <div className="relative mt-2 flex items-center gap-1.5" title={sports.join(', ') || undefined}>
+          {sports.length === 0 ? <span className="text-xs text-white/50">Sports to be announced</span> : (
+            <>
+              {sports.slice(0, 6).map((s) => <span key={s} className="grid h-7 w-7 place-items-center rounded-full bg-white/10 text-sm ring-1 ring-white/15" aria-hidden>{iconOf(s)}</span>)}
+              {sports.length > 6 && <span className="text-xs font-bold text-white/70">+{sports.length - 6}</span>}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="flex-1 space-y-1 p-4">
+        <Link to={`/championships/${c.id}`} className="line-clamp-2 text-base font-black leading-snug text-slate-900 hover:text-[var(--accent-deep)] dark:text-slate-100 dark:hover:text-[var(--accent)]">{c.name}</Link>
+        <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+          <MapPin size={13} className="shrink-0" aria-hidden />
+          <span className="truncate" title={citiesLabel(cities) || undefined}>{citiesShort(cities) || 'Venue to be confirmed'}</span>
+        </div>
+        {sports.length > 0 && <div className="truncate text-xs text-slate-400" title={sports.join(', ')}>{sports.join(' · ')}</div>}
+      </div>
+      <div className="flex min-h-[52px] flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 dark:border-slate-800">{entry}</div>
+    </article>
+  );
+}
+
 // Discover - every championship on the platform, open to any signed-in user.
-// Searchable and filterable by sport / status so the list never dumps everything.
-//
-// WHO IS ENTERING IS THE WORKSPACE'S QUESTION (F-052), not this page's. The listing is
-// the same either way; the CTA is not:
-//
-//   My Space  - you are here as yourself, so Register opens the popup, and that popup
-//               is where the organisation to compete under is picked or created.
-//   An org    - you chose that organisation when you entered its workspace. Register
-//               enters it, and no popup asks a question already answered.
-//
-// An "entering as" selector above the list used to ask it a third time, and then had
-// to hand its answer down into the popup to stop it being asked twice.
+// WHO IS ENTERING IS THE WORKSPACE'S QUESTION (F-052): in My Space, Register opens the
+// popup that picks or creates the organisation; in an org, Register enters that org.
 export function DiscoverPage() {
+  usePageTitle('Discover');
   const ws = useWorkspace();
   const { ctx } = useAuth();
   const qc = useQueryClient();
   const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
-  // scope=all so an application made under ANY of the user's orgs (incl. one just
-  // created via the apply flow) flips the card's CTA to "Your application".
+  // scope=all so an application made under ANY of the user's orgs flips the CTA.
   const { data: enrollments = [] } = useApi<any[]>('/me/enrollments?scope=all');
-  const [sport, setSport] = useState('');
-  const [status, setStatus] = useState('');
+  const iconOf = useSportIcon();
+  const [sports, setSports] = useState<string[]>([]);
+  const [sportsOpen, setSportsOpen] = useState(false);
+  const [status, setStatus] = useState('all');
   const [applying, setApplying] = useState<Championship | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // The organisation this Discover belongs to, if any. Undefined in personal space,
-  // and in an event or assignment workspace - neither of which enters anybody.
+  // The organisation this Discover belongs to, if any. Undefined in personal space.
   const activeOrg = useMemo(() => {
     if (ws.active?.kind !== 'org') return undefined;
     const id = ws.active.id;
@@ -172,10 +215,11 @@ export function DiscoverPage() {
   const mayEnter = !activeOrg || canEnter(activeOrg);
   // An archived organisation enters nothing - the server refuses it too.
   const orgArchived = !!activeOrg?.organization?.archived_at;
+  // Teal is the personal workspace's colour; an organisation keeps its blue.
+  const accent = activeOrg ? 'brand' : 'teal';
+  const PILL = activeOrg ? PILL_BRAND : PILL_TEAL;
 
-  // In an organisation, only ITS application counts: one made under another of your
-  // organisations is not this one's, and reporting it here would tell an org it had
-  // applied when it had not.
+  // In an organisation, only ITS application counts, not one made under another of your orgs.
   const enrollmentStatusFor = (eventId: string) =>
     enrollments.find((e) =>
       e.championship_id === eventId && (!activeOrg || e.organization_id === activeOrg.organization_id),
@@ -195,25 +239,25 @@ export function DiscoverPage() {
     }
   };
 
-  const sportOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of championships) for (const s of c.sports ?? []) set.add(s);
-    return [...set].sort();
+  const sportOptions = useSportOptions(useMemo(() => championships.map((c) => c.sports), [championships]), iconOf);
+  const statusTabs = useMemo(() => {
+    const present = new Set(championships.map((c) => c.status));
+    const order = [...STATUS_ORDER.filter((s) => present.has(s)), ...[...present].filter((s) => !STATUS_ORDER.includes(s)).sort()];
+    return [
+      { value: 'all', label: 'All', badge: <span className="tabular-nums opacity-70">{championships.length}</span> },
+      ...order.map((s) => ({ value: s, label: eventStatusLook(s).label, badge: <span className="tabular-nums opacity-70">{championships.filter((c) => c.status === s).length}</span> })),
+    ];
   }, [championships]);
-  const statusOptions = useMemo(
-    () => [...new Set(championships.map((c) => c.status))].sort(),
-    [championships],
-  );
 
   const filtered = useMemo(
     () => championships.filter((c) =>
-      (!sport || (c.sports ?? []).includes(sport)) &&
-      (!status || c.status === status)),
-    [championships, sport, status],
+      (!sports.length || (c.sports ?? []).some((s) => sports.includes(s))) &&
+      (status === 'all' || c.status === status)),
+    [championships, sports, status],
   );
 
   const tc = useTableControls(filtered, {
-    search: (c) => `${c.name} ${c.venue ?? ''} ${(c.sports ?? []).join(' ')}`,
+    search: (c) => `${c.name} ${c.venue ?? ''} ${(c.host_cities ?? []).join(' ')} ${(c.sports ?? []).join(' ')}`,
     sorts: {
       start: (a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime(),
       name: (a, b) => String(a.name).localeCompare(String(b.name)),
@@ -222,127 +266,94 @@ export function DiscoverPage() {
     pageSize: 12,
   });
 
+  const viewLink = (c: Championship, label = 'View event') => (
+    <Link to={`/championships/${c.id}`} className={cn('inline-flex items-center gap-1 text-[13px] font-bold transition hover:gap-1.5',
+      activeOrg ? 'text-brand-600 dark:text-brand-300' : 'text-[var(--accent-deep)] dark:text-[var(--accent)]')}>
+      {label}<ArrowRight size={14} aria-hidden />
+    </Link>
+  );
+
+  // The card's foot: your application, a way in, or just a look.
+  const entryFor = (c: Championship) => {
+    const applied = enrollmentStatusFor(c.id);
+    if (applied) {
+      return (
+        <>
+          <span className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            {activeOrg ? orgLabel(activeOrg) : 'Your application'}
+            <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider', APPLIED_CHIP[applied] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>{applied}</span>
+          </span>
+          {viewLink(c, 'View')}
+        </>
+      );
+    }
+    if (c.status !== 'registration_open') return <><span className="text-xs text-slate-400">Entries closed</span>{viewLink(c)}</>;
+    if (activeOrg && !mayEnter) {
+      // Sports Admin holds the org by grant, which the server won't accept, so name who can apply.
+      return <><span className="text-xs text-slate-400" title={`An owner or admin of ${orgLabel(activeOrg)} can enter it into this championship.`}>Owner or admin only</span>{viewLink(c, 'View')}</>;
+    }
+    return (
+      <>
+        {viewLink(c, 'Details')}
+        {activeOrg ? (
+          <button type="button" className={PILL} disabled={busyId === c.id || orgArchived}
+            title={orgArchived ? ORG_ARCHIVED_READ_ONLY_MESSAGE : `Register ${orgLabel(activeOrg)}`} onClick={() => registerActiveOrg(c)}>
+            {busyId === c.id ? 'Registering…' : 'Register'}
+          </button>
+        ) : (
+          <button type="button" className={PILL} onClick={() => setApplying(c)}>Register</button>
+        )}
+      </>
+    );
+  };
+
   return (
     // pb-20 keeps the bottom pagination clear of the floating Feedback button.
-    <div className="pb-20">
-      <PageHeader inTopBar
-        title="Discover"
-        subtitle={activeOrg
+    <div className="space-y-4 pb-20">
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        {activeOrg
           ? `Championships open to ${activeOrg.organization?.name ?? 'your organisation'} - registering enters this organisation.`
           : 'Championships open to you - to play in yourself, or to enter an organisation into.'}
-      />
+      </p>
 
       {championships.length > 0 && (
-        <ListToolbar>
-          <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
-          <Select value={sport} onChange={(e) => setSport(e.target.value)} className="w-auto" aria-label="Filter by sport">
-            <option value="">All sports</option>
-            {sportOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-          </Select>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            {statusOptions.map((s) => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
-          </Select>
-        </ListToolbar>
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="max-w-full overflow-x-auto">
+              <ViewTabs value={status} onChange={setStatus} options={statusTabs} />
+            </div>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              {/* SearchInput will not shrink on its own; this wrapper lets it give way to the Sports button. */}
+              <div className="min-w-0 flex-1 sm:w-72 sm:flex-none"><SearchInput pill value={tc.query} onChange={tc.setQuery} placeholder="Search events, cities, sports" className="w-full" /></div>
+              {sportOptions.length > 1 && (
+                <SportFilterButton open={sportsOpen} picked={sports.length} onToggle={() => setSportsOpen((o) => !o)} controls="discover-sports" accent={accent} />
+              )}
+            </div>
+          </div>
+          {sportsOpen && sportOptions.length > 1 && (
+            <SportFilterPanel id="discover-sports" sports={sportOptions} value={sports} onChange={setSports} allTotal={championships.length} />
+          )}
+        </>
       )}
-      {isLoading ? <Spinner /> : tc.total === 0 ? (
+
+      {isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Loading">
+          {[0, 1, 2, 3, 4, 5].map((i) => <PosterSkeleton key={i} />)}
+        </div>
+      ) : tc.total === 0 ? (
         <EmptyState
-          icon="◈"
-          title={championships.length === 0 ? 'No championships yet' : 'No championships match'}
+          icon={<Compass size={22} />}
+          title={championships.length === 0 ? 'No events yet' : 'No events match'}
           description={championships.length === 0
-            ? 'When an organiser hosts a championship it will show up here.'
-            : 'Try a different sport, status or search term.'}
+            ? 'When an organiser hosts an event, it shows up here.'
+            : 'Try another status, sport or search.'}
         />
       ) : (
         <>
-          <div className={`overflow-x-auto ${SURFACE}`}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
-                  <th className="px-4 py-3">Championship</th>
-                  <th className="px-4 py-3">Sports</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="w-px whitespace-nowrap px-4 py-3 text-right">Entry</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tc.view.map((c) => {
-                  const sports = c.sports ?? [];
-                  // Like sports: the first two cities, then "+N", all of them on hover.
-                  const cities = hostCitiesFor(c);
-                  const applied = enrollmentStatusFor(c.id);
-                  return (
-                    <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                      <td className="px-4 py-3">
-                        <Link to={`/championships/${c.id}`} className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100">
-                          {c.name}
-                        </Link>
-                        <div className="text-xs text-slate-500">
-                          <span title={citiesLabel(cities) || undefined}>{citiesShort(cities) || 'Venue TBD'}</span>
-                          {' · '}{fmtDateRange(c.start_date, c.end_date)}
-                        </div>
-                      </td>
-                      {/* Sports were the card's third line; as a column they stay
-                          scannable down the list instead of per-tile. */}
-                      <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                        {sports.length === 0 ? (
-                          <span className="text-slate-400 dark:text-slate-600">-</span>
-                        ) : (
-                          <span title={sports.join(', ')}>
-                            {sports.slice(0, 3).join(' · ')}{sports.length > 3 ? ` +${sports.length - 3}` : ''}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          {c.visibility === 'private' && <StatusBadge status="private" label="Private" />}
-                          <StatusBadge status={c.status} />
-                        </div>
-                      </td>
-                      {/* Every state in this cell is one right-aligned, nowrap row of
-                          the same height - a button, a badge, or a link. The column
-                          shrinks to its content (w-px) so the name column keeps the
-                          slack, and nothing here reflows as the page filters. */}
-                      <td className="w-px whitespace-nowrap px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          {applied ? (
-                            <>
-                              <span className="text-xs text-slate-500 dark:text-slate-400">
-                                {activeOrg ? orgLabel(activeOrg) : 'You'}
-                              </span>
-                              <StatusBadge status={applied} />
-                            </>
-                          ) : c.status !== 'registration_open' ? (
-                            <Link to={`/championships/${c.id}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
-                              View →
-                            </Link>
-                          ) : activeOrg ? (
-                            // Discover reaches Sports Admin, who holds the org by grant
-                            // rather than by membership - the server would refuse the
-                            // application, so name who can make it instead of offering a
-                            // button that fails.
-                            !mayEnter ? (
-                              <span className="text-xs text-slate-400 dark:text-slate-500" title={`An owner or admin of ${orgLabel(activeOrg)} can enter it into this championship.`}>
-                                Owner or admin only
-                              </span>
-                            ) : (
-                              <Button size="sm" disabled={busyId === c.id || orgArchived}
-                                title={orgArchived ? ORG_ARCHIVED_READ_ONLY_MESSAGE : `Register ${orgLabel(activeOrg)}`} onClick={() => registerActiveOrg(c)}>
-                                {busyId === c.id ? 'Registering…' : 'Register'}
-                              </Button>
-                            )
-                          ) : (
-                            <Button size="sm" onClick={() => setApplying(c)}>Register</Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {tc.view.map((c) => <EventPoster key={c.id} c={c} iconOf={iconOf} entry={entryFor(c)} />)}
           </div>
-          <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
+          <PillPagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} noun="event" />
         </>
       )}
 

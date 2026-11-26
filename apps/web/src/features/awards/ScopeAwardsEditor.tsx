@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Medal, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, Field, Input, SearchableSelect, Select, Spinner, toast } from '../../components/ui';
+import { EmptyState, Input, cn, toast } from '../../components/ui';
+import { PickList } from '../../components/PickList';
+import { IconAction } from '../../components/CrewPanel';
 import type { AwardType } from './types';
 
 export type ScopeLevel = 'tournament_sport' | 'tournament' | 'championship';
@@ -43,14 +45,18 @@ export const scopeQuery = (s: AwardScopeRef) => new URLSearchParams({
   ...(s.tournament_sport_id && s.level === 'tournament_sport' ? { tournament_sport_id: s.tournament_sport_id } : {}),
 }).toString();
 
+const FIELD_LABEL = 'mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400';
+
 // Give awards within one scope - a sport in a tournament, a tournament, or the
 // whole event. Award types come from the catalogue (offered at this level for a
 // sport in the scope); recipients are the teams entered in it and their players.
-export function ScopeAwardsEditor({ eventId, scope, saved, readOnly }: {
+export function ScopeAwardsEditor({ eventId, scope, saved, readOnly, icon }: {
   eventId: string;
   scope: AwardScopeRef;
   saved: ChampionshipAward[];
   readOnly?: boolean;
+  /** The scope's own mark in the header (a sport's emoji, a trophy). */
+  icon?: ReactNode;
 }) {
   const optionsPath = `/championships/${eventId}/awards/options?${scopeQuery(scope)}`;
   const { data: options, isLoading } = useApi<Options>(optionsPath);
@@ -58,17 +64,20 @@ export function ScopeAwardsEditor({ eventId, scope, saved, readOnly }: {
   const typeById = useMemo(() => new Map(types.map((t) => [t.id, t])), [types]);
   const [rows, setRows] = useState<Row[]>([]);
 
+  // What is saved for this scope, as editable rows.
+  const savedRows = useMemo<Row[]>(() => saved.map((a) => ({
+    award_type_id: a.award_type_id,
+    recipient_user_id: a.recipient_user_id,
+    recipient_team_id: a.recipient_team_id,
+    notes: a.notes ?? '',
+  })), [saved]);
   // Reload whenever the scope or what is saved for it changes.
   const savedKey = saved.map((a) => a.id).join(',');
   useEffect(() => {
-    setRows(saved.map((a) => ({
-      award_type_id: a.award_type_id,
-      recipient_user_id: a.recipient_user_id,
-      recipient_team_id: a.recipient_team_id,
-      notes: a.notes ?? '',
-    })));
+    setRows(savedRows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedKey, scope.level, scope.tournament_id, scope.tournament_sport_id]);
+  const dirty = JSON.stringify(rows) !== JSON.stringify(savedRows);
 
   const save = useApiMutation(
     (body: unknown) => api('PUT', `/championships/${eventId}/awards`, body),
@@ -77,7 +86,12 @@ export function ScopeAwardsEditor({ eventId, scope, saved, readOnly }: {
 
   const players = options?.players ?? [];
   const teams = options?.teams ?? [];
-  const playerOptions = useMemo(() => players.map((p) => ({ id: p.id, label: `${p.name} · ${p.team}` })), [players]);
+  const typeOptions = useMemo(() => types.map((t) => ({
+    value: t.id, label: t.label, hint: t.recipient_kind === 'team' ? 'Team' : 'Player',
+    group: t.championship_id ? 'This event only' : 'Standard awards',
+  })), [types]);
+  const teamOptions = useMemo(() => teams.map((t) => ({ value: t.id, label: t.name, hint: t.organization ?? undefined })), [teams]);
+  const playerOptions = useMemo(() => players.map((p) => ({ value: p.id, label: p.name, hint: p.team })), [players]);
 
   const blank = (typeId: string): Row => {
     const team = typeById.get(typeId)?.recipient_kind === 'team';
@@ -89,6 +103,7 @@ export function ScopeAwardsEditor({ eventId, scope, saved, readOnly }: {
     const sameKind = typeById.get(typeId)?.recipient_kind === typeById.get(row.award_type_id)?.recipient_kind;
     return sameKind ? { ...row, award_type_id: typeId } : { ...blank(typeId), notes: row.notes };
   }));
+  const add = () => setRows((r) => [...r, blank(types[0].id)]);
 
   const problem = rows.some((r) => !typeById.has(r.award_type_id)) ? 'Pick an award for every row'
     : rows.some((r) => !r.recipient_user_id && !r.recipient_team_id) ? 'Pick who gets each award' : null;
@@ -104,69 +119,96 @@ export function ScopeAwardsEditor({ eventId, scope, saved, readOnly }: {
   });
 
   return (
-    <Card>
-      <CardHeader title={scope.title} subtitle={scope.subtitle} />
-      <CardBody className="space-y-3">
-        {isLoading ? (
-          <div className="grid h-24 place-items-center"><Spinner /></div>
-        ) : types.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No award types are offered at this level for these sports. Add one for this event below, or ask a platform admin.</p>
-        ) : teams.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No teams are entered here yet, so there is nobody to give an award to.</p>
-        ) : (
-          <>
-            {rows.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-400">No awards given here yet.</p>}
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <header className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-lg text-amber-600 dark:bg-amber-500/15 dark:text-amber-300" aria-hidden>
+          {icon ?? <Medal size={18} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[15px] font-black text-slate-900 dark:text-slate-100">{scope.title}</h2>
+          <p className="truncate text-xs text-slate-500 dark:text-slate-400">{scope.subtitle}</p>
+        </div>
+        {saved.length > 0 && (
+          <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+            {saved.length} given
+          </span>
+        )}
+      </header>
+
+      {isLoading ? (
+        <div className="space-y-2 p-4" aria-label="Loading">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />)}</div>
+      ) : types.length === 0 ? (
+        <EmptyState bare compact icon={<Medal size={22} />} title="No awards offered here"
+          description="No award types are offered at this level for these sports. Add one for this event below, or ask a platform admin." />
+      ) : teams.length === 0 ? (
+        <EmptyState bare compact icon={<Medal size={22} />} title="Nobody to award yet"
+          description="No teams are entered here yet, so there is nobody to give an award to." />
+      ) : rows.length === 0 && saved.length === 0 ? (
+        // Only when nothing was saved: removing every saved award must still leave Save to confirm it.
+        <EmptyState bare compact icon={<Medal size={22} />} title="No awards given here yet"
+          description="Pick an award and who gets it - best player, fair play, top scorer."
+          action={!readOnly ? <button type="button" onClick={add} className="bg-brand-600 text-white hover:bg-brand-700"><Plus size={14} aria-hidden />Add award</button> : undefined} />
+      ) : (
+        <>
+          {rows.length === 0 && <p className="px-4 pt-4 text-sm text-slate-500 dark:text-slate-400">Every award here has been removed. Save to confirm, or add one back.</p>}
+          <ol className="space-y-2.5 p-3 empty:hidden sm:p-4">
             {rows.map((row, i) => {
               const type = typeById.get(row.award_type_id);
               const team = type?.recipient_kind === 'team';
               return (
-                <div key={i} data-qa="scope-award-row" className="grid grid-cols-1 items-start gap-x-2 rounded-lg border border-slate-100 p-3 dark:border-slate-800 sm:grid-cols-[1fr_1fr_auto]">
-                  <Field label="Award" compact>
-                    <Select className="w-full" value={type ? row.award_type_id : ''} disabled={readOnly} onChange={(e) => changeType(i, e.target.value)}>
-                      <option value="" disabled>Choose an award…</option>
-                      {types.map((t) => <option key={t.id} value={t.id}>{t.label}{t.recipient_kind === 'team' ? ' (team)' : ''}{t.championship_id ? ' · this event' : ''}</option>)}
-                    </Select>
-                  </Field>
-                  <Field label={team ? 'Team' : 'Player'} compact>
-                    {team ? (
-                      <Select className="w-full" value={row.recipient_team_id ?? ''} disabled={readOnly} onChange={(e) => update(i, { recipient_team_id: e.target.value, recipient_user_id: null })}>
-                        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.organization ? ` · ${t.organization}` : ''}</option>)}
-                      </Select>
-                    ) : (
-                      <SearchableSelect
-                        className="w-full"
-                        value={row.recipient_user_id ?? ''}
-                        onChange={(id) => update(i, { recipient_user_id: id, recipient_team_id: null })}
-                        options={playerOptions}
-                        placeholder="Choose a player…"
-                        searchPlaceholder="Search players…"
-                      />
-                    )}
-                  </Field>
-                  {!readOnly && (
-                    <Button variant="ghost" size="sm" className="sm:mt-6" onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))} aria-label="Remove award" title="Remove">
-                      <Trash2 size={14} />
-                    </Button>
-                  )}
-                  <div className="sm:col-span-2">
-                    <Field label="Note (optional)" compact>
-                      <Input value={row.notes} disabled={readOnly} maxLength={500} placeholder="e.g. 42 raid points across the tournament" onChange={(e) => update(i, { notes: e.target.value })} />
-                    </Field>
+                <li key={i} data-qa="scope-award-row" className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-800/20">
+                  <span className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-white shadow-sm sm:grid" aria-hidden>
+                    <Medal size={16} />
+                  </span>
+                  <div className="grid min-w-0 flex-1 gap-2.5 sm:grid-cols-2">
+                    <label className="min-w-0">
+                      <span className={FIELD_LABEL}>Award</span>
+                      {readOnly
+                        ? <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{type?.label ?? '-'}</span>
+                        : <PickList value={type ? row.award_type_id : ''} onChange={(v) => changeType(i, v)} options={typeOptions} placeholder="Choose an award…" searchPlaceholder="Find an award" ariaLabel="Award" />}
+                    </label>
+                    <label className="min-w-0">
+                      <span className={FIELD_LABEL}>{team ? 'Team' : 'Player'}</span>
+                      {readOnly
+                        ? <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            {(team ? teams.find((t) => t.id === row.recipient_team_id)?.name : players.find((p) => p.id === row.recipient_user_id)?.name) ?? '-'}
+                          </span>
+                        : team
+                          ? <PickList value={row.recipient_team_id ?? ''} onChange={(v) => update(i, { recipient_team_id: v, recipient_user_id: null })} options={teamOptions} placeholder="Choose a team…" searchPlaceholder="Find a team" ariaLabel="Team" />
+                          : <PickList value={row.recipient_user_id ?? ''} onChange={(v) => update(i, { recipient_user_id: v, recipient_team_id: null })} options={playerOptions} placeholder="Choose a player…" searchPlaceholder="Search players" ariaLabel="Player" />}
+                    </label>
+                    <label className="min-w-0 sm:col-span-2">
+                      <span className={FIELD_LABEL}>Note <span className="normal-case tracking-normal text-slate-400/80">(optional)</span></span>
+                      <Input value={row.notes} disabled={readOnly} maxLength={500} placeholder="e.g. 42 raid points across the tournament" onChange={(e) => update(i, { notes: e.target.value })} className="w-full" />
+                    </label>
                   </div>
-                </div>
+                  {!readOnly && (
+                    <span className="shrink-0 pt-5">
+                      <IconAction icon={Trash2} danger label="Remove award" onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))} />
+                    </span>
+                  )}
+                </li>
               );
             })}
-            {!readOnly && (
-              <div className="flex items-center justify-between pt-1">
-                <Button variant="outline" size="sm" onClick={() => setRows((r) => [...r, blank(types[0].id)])}>+ Add award</Button>
-                <Button size="sm" data-qa="scope-awards-save" disabled={save.isPending || !!problem} title={problem ?? undefined} onClick={submit}>
+          </ol>
+          {!readOnly && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-3 py-3 sm:px-4 dark:border-slate-800">
+              <button type="button" onClick={add}
+                className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-slate-300 px-3 py-1.5 text-[13px] font-semibold text-slate-600 transition hover:border-brand-400 hover:bg-brand-50/50 hover:text-brand-700 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-brand-500/10">
+                <Plus size={14} aria-hidden />Add award
+              </button>
+              <span className="ml-auto flex items-center gap-3">
+                {dirty && <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />Unsaved changes</span>}
+                <button type="button" data-qa="scope-awards-save" disabled={save.isPending || !!problem || !dirty} title={problem ?? (!dirty ? 'Nothing to save' : undefined)} onClick={submit}
+                  className={cn('inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50',
+                    'bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500')}>
                   {save.isPending ? 'Saving…' : 'Save awards'}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </CardBody>
-    </Card>
+                </button>
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }

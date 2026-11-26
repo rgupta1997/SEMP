@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Trophy } from 'lucide-react';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, StatusBadge } from '../../components/ui';
@@ -54,7 +55,7 @@ export function EventsListPage() {
       </PageHeader>
 
       {isLoading ? <EventGridSkeleton /> : championships.length === 0 ? (
-        <EmptyState icon="◆" title="No championships yet" description="Create your first championship to build tournaments, open registration and run match day."
+        <EmptyState icon={<Trophy size={24} />} title="No championships yet" description="Create your first championship to build tournaments, open registration and run match day."
           action={<Button onClick={() => navigate('/championships/new')}>+ Create Event</Button>} />
       ) : (
         <>
@@ -72,7 +73,7 @@ export function EventsListPage() {
           </ListToolbar>
 
           {t.total === 0 ? (
-            <EmptyState icon="◆" title="No matching championships" description="Try a different search or status filter." />
+            <EmptyState icon={<Trophy size={24} />} title="No matching championships" description="Try a different search or status filter." />
           ) : (
             <>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

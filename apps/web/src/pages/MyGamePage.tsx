@@ -1,10 +1,16 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, CalendarClock, ChevronRight, ClipboardPen, Compass, Medal, Trophy, Users, type LucideIcon } from 'lucide-react';
+import { KHO_END_LABEL, KHO_END_SHORT } from '@semp/shared';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
 import { usePageTitle } from '../lib/pageTitle';
-import { Spinner } from '../components/ui';
-import { formatPoints, KHO_END_LABEL, KHO_END_SHORT } from '@semp/shared';
+import { EmptyState, cn } from '../components/ui';
+import { LiveDot, TeamAvatar } from '../features/schedule/ScheduleParts';
+import { PILL_GHOST, PILL_TEAL, TEAL_TILE } from '../features/personal/styles';
+import { MyGameSkeleton } from '../features/personal/MyGameSkeleton';
+import { PlayerBadge } from '../features/personal/PlayerBadge';
+import { DayTile, MatchMeta, RESULT_TAG, Scoreline, score } from '../features/personal/MatchParts';
 
 // My Game - personal landing screen (PG-10, F-040..F-044). A new account lands here with
 // nothing, so empty states must read as a beginning, not a broken page.
@@ -20,352 +26,451 @@ interface Match {
   pens?: [number, number] | null;
   /** Kho kho: settled on minimum chase or won by an innings. */
   settled?: 'minimum_chase' | 'innings' | null;
-  result: 'won' | 'lost' | 'drawn' | 'bye' | null;
+  result: 'won' | 'lost' | 'draw' | 'pending' | null;
   reason?: string;
 }
 
 interface Home {
   next: Match | null;
   live: Match[];
+  /** Every live match, though only the first two are sent. */
+  live_total?: number;
   pending: Match[];
   recent: Match[];
   teams: Array<{ id: string; name: string | null; organization: string | null; sport: string | null; role: string }>;
-  stats: { games: number; events: number; sports: number; wins: number };
+  stats: { games: number; events: number; sports: number; wins: number; draws?: number; losses?: number };
 }
 
-const C = {
-  blue: 'var(--brand)', blue50: 'var(--brand-tint)', navy: 'var(--ink)',
-  // Accent on the brand hero: a light step of the brand's own ramp (not Sportagon teal),
-  // so it matches the institution and contrast is guaranteed.
-  teal: 'var(--on-brand)',
-  line: 'var(--line)', line2: 'var(--line-2)', fg2: 'var(--ink-2)', fg3: 'var(--ink-4)', fg4: 'var(--muted)',
-  faint: 'var(--faint)', ground: 'var(--surface-2)', surface: 'var(--surface-3)',
-  ok: 'var(--ok-ink)', okSoft: 'var(--ok-soft)', bad: 'var(--bad-ink)', badSoft: 'var(--bad-soft)',
-  warn: 'var(--amber-ink)', warnSoft: 'var(--amber-soft)', brandSoft: 'var(--brand-line)',
-};
-const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
-const MONO = "'JetBrains Mono',ui-monospace,monospace";
-
-const card: React.CSSProperties = {
-  background: 'var(--surface-1)', border: `1px solid ${C.line}`, borderRadius: 14,
-  padding: 18, boxShadow: '0 1px 3px rgba(10,26,51,.08)',
-};
-const cardTitle: React.CSSProperties = { fontFamily: POP, fontWeight: 800, fontSize: 15, marginBottom: 12 };
-
-const initials = (s: string | null) => (s ?? '?').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-// The next-game matchup line. Full names read as written (no caps, lighter weight) -
-// all-caps black made them a wall of shouting; the short-name headline keeps that style.
-const MATCHUP_FULL_STYLE: React.CSSProperties = { fontFamily: POP, fontWeight: 700, letterSpacing: '-.01em' };
-const MATCHUP_SHORT_STYLE: React.CSSProperties = { fontFamily: POP, fontWeight: 900, letterSpacing: '-.02em', textTransform: 'uppercase' };
-const MATCHUP_FULL = 'clamp(20px,2.6vw,28px)';
-
-/** A team's short label: its own short name, else its initials. */
-const shortOf = (t: { name: string; short_name?: string | null } | null) => t?.short_name?.trim() || initials(t?.name ?? null);
-
-/**
- * True while `probe` (the full text, wrapped at the box's width) takes at most `maxLines`
- * lines. Re-checked on resize and once web fonts load.
- */
-function useFits(maxLines: number, deps: unknown[]) {
-  const box = useRef<HTMLDivElement>(null);
-  const probe = useRef<HTMLDivElement>(null);
-  const [fits, setFits] = useState(true);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const check = () => {
-      const p = probe.current;
-      if (!p) return setFits(true);
-      const line = parseFloat(getComputedStyle(p).lineHeight) || 1;
-      setFits(p.getBoundingClientRect().height <= line * maxLines + 1);
-    };
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    let live = true;
-    document.fonts?.ready.then(() => { if (live) check(); });
-    return () => { live = false; ro.disconnect(); };
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
-  return { box, probe, fits };
-}
-
-// Lists here grow without bound; cap each so this first screen stays a fixed-height overview.
+// Lists here grow without bound; cap each so this first screen stays an overview.
 const ROW_LIMIT = 5;
+// Live matches shown on My Game before "View all".
+const LIVE_LIMIT = 2;
+const CARD = 'overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
+const CARD_HEAD = 'flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800';
 
-/** "View more (N)" / "View less" - only rendered once there's actually a rest to reveal. */
-function ViewToggle({ total, shown, expanded, onToggle }: { total: number; shown: number; expanded: boolean; onToggle: () => void }) {
-  if (total <= shown && !expanded) return null;
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      style={{
-        marginTop: 10, fontFamily: POP, fontWeight: 700, fontSize: 12.5, color: C.blue,
-        background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-      }}
-    >
-      {expanded ? 'View less' : `View more (${total - shown})`}
-    </button>
-  );
+/** How each result reads: the form-guide letter, the row's tone. */
+const RESULT_LOOK: Record<string, { letter: string; label: string; chip: string; bar: string }> = {
+  won: { letter: 'W', label: 'Won', chip: 'bg-emerald-500 text-white', bar: 'bg-emerald-500' },
+  lost: { letter: 'L', label: 'Lost', chip: 'bg-rose-500 text-white', bar: 'bg-rose-500' },
+  draw: { letter: 'D', label: 'Drawn', chip: 'bg-slate-400 text-white', bar: 'bg-slate-400' },
+};
+const lookOf = (r: Match['result']) => RESULT_LOOK[r ?? ''] ?? { letter: '-', label: 'Played', chip: 'bg-slate-200 text-slate-600', bar: 'bg-slate-300' };
+
+/** "Good morning" by the clock. */
+function greeting(d = new Date()) {
+  const h = d.getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
+/** "4:46 PM" in any locale: 12-hour, upper-case AM/PM. */
+const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase();
+
+/** "Today · 5:00 PM", "Tomorrow · 9:30 AM", "28 Nov · 4:00 PM". */
 function when(iso: string | null) {
   if (!iso) return 'Time to be confirmed';
   const d = new Date(iso);
   const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
   const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
-  const prefix = sameDay ? 'Today' : d.toDateString() === tomorrow.toDateString() ? 'Tomorrow'
-    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  return `${prefix} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  const day = d.toDateString() === today.toDateString() ? 'Today'
+    : d.toDateString() === tomorrow.toDateString() ? 'Tomorrow'
+      : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return `${day} · ${clock(d)}`;
 }
 
-/** The empty hero. A first-time account should be invited somewhere, not shown a blank. */
-function NoNextGame() {
+/** "in 45 min", "in 3 h", "in 2 days" - how long until kick-off. */
+function countdown(iso: string | null) {
+  if (!iso) return null;
+  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (mins <= 0) return 'starting now';
+  if (mins < 60) return `in ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `in ${hours} h`;
+  const days = Math.round(hours / 24);
+  return `in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+
+/** Faint pitch lines and kit stripes behind the hero: sporty texture, not a picture. */
+function HeroTexture() {
   return (
-    <div style={{ ...card, padding: '30px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: C.fg4 }}>
-        Next game
-      </div>
-      <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 22, color: C.navy }}>Nothing scheduled yet</div>
-      <p style={{ margin: 0, fontSize: 13.5, color: C.fg4, lineHeight: 1.6, maxWidth: '46ch' }}>
-        Once you are in a squad and the fixtures are out, your next match shows up here with the time and the venue.
-      </p>
-      <Link to="/discover" style={{ marginTop: 6, fontFamily: POP, fontWeight: 700, fontSize: 13, color: C.blue, textDecoration: 'none' }}>
-        Find something to play →
-      </Link>
+    <svg aria-hidden viewBox="0 0 1200 360" preserveAspectRatio="xMaxYMid slice" className="pointer-events-none absolute inset-0 h-full w-full">
+      <g stroke="#fff" strokeOpacity=".06" strokeWidth="2" fill="none">
+        <rect x="540" y="24" width="640" height="312" />
+        <line x1="860" y1="24" x2="860" y2="336" />
+        <circle cx="860" cy="180" r="62" />
+        <rect x="540" y="100" width="80" height="160" />
+        <rect x="1100" y="100" width="80" height="160" />
+      </g>
+      <g fill="#5CE1E6">
+        <polygon points="380,360 470,360 710,0 620,0" opacity=".07" />
+        <polygon points="490,360 520,360 760,0 730,0" opacity=".12" />
+        <polygon points="538,360 550,360 790,0 778,0" opacity=".18" />
+      </g>
+    </svg>
+  );
+}
+
+/** One side of the fixture: crest and name. */
+function Side({ team }: { team: Match['my_team'] | Match['opponent'] }) {
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+      <TeamAvatar name={team?.name ?? 'TBD'} short={team?.short_name} />
+      <span className="line-clamp-2 text-[13px] font-bold leading-tight text-slate-800 dark:text-slate-100" title={team?.name ?? ''}>{team?.name ?? 'TBC'}</span>
     </div>
   );
 }
 
-function NextGameHero({ m }: { m: Match }) {
-  const nav = useNavigate();
-  const meta = [
-    [m.sport, m.discipline].filter(Boolean).join(' · '),
-    when(m.scheduled_at),
-    m.championship?.name,
-  ].filter(Boolean) as string[];
-  const fullA = m.my_team?.name ?? 'Your team';
-  const fullB = m.opponent?.name ?? 'TBC';
-  const matchup = useFits(3, [fullA, fullB]);
-
+/** The next fixture, laid out like a match-centre card: crests either side, kick-off in the middle. */
+function FixtureCard({ next, iconOf, onOpen, emptyAction }: {
+  next: Match | null; iconOf: (s: string | null) => string; onOpen: () => void; emptyAction: ReactNode;
+}) {
+  const at = next?.scheduled_at ? new Date(next.scheduled_at) : null;
+  const left = next ? countdown(next.scheduled_at) : null;
   return (
-    <div style={{
-      background: C.blue, borderRadius: 14, padding: '24px 26px', color: '#fff',
-      position: 'relative', overflow: 'hidden', boxShadow: '0 12px 28px color-mix(in srgb, var(--brand) 28%, transparent)',
-    }}>
-      {/* The hexagon bleed from the prototype - decoration, so hidden from readers. */}
-      <div aria-hidden style={{
-        position: 'absolute', right: -70, bottom: -90, width: 'min(280px, calc(100vw - 40px))', height: 280,
-        opacity: 0.18, border: `2px solid ${C.teal}`,
-        clipPath: 'polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0% 50%)',
-      }} />
-      <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: C.teal }}>
-        Next game
+    <div className="min-w-0 overflow-hidden rounded-2xl bg-white text-slate-900 shadow-xl shadow-black/30 dark:bg-slate-900 dark:text-slate-100">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2 dark:border-slate-800">
+        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--accent-deep)] dark:text-[var(--accent)]">Next fixture</span>
+        {left && <span className="rounded-full bg-[var(--accent)]/15 px-2 py-0.5 text-[11px] font-bold text-[var(--accent-deep)] dark:text-[var(--accent)]">Starts {left}</span>}
       </div>
-      {/* Full names, a size down and wrapping onto up to three lines. Only names too long
-          for that fall back to the short name (or initials), at the big headline size. */}
-      <div ref={matchup.box} title={`${fullA} vs ${fullB}`} style={{
-        ...(matchup.fits ? MATCHUP_FULL_STYLE : MATCHUP_SHORT_STYLE),
-        fontSize: matchup.fits ? MATCHUP_FULL : 'clamp(25px,4.4vw,38px)',
-        lineHeight: matchup.fits ? 1.15 : 1, marginTop: 16, position: 'relative', overflowWrap: 'anywhere',
-      }}>
-        {matchup.fits ? fullA : shortOf(m.my_team)} <span style={{ color: '#8FB2EE' }}>vs</span> {matchup.fits ? fullB : shortOf(m.opponent)}
-        <div ref={matchup.probe} aria-hidden style={{
-          ...MATCHUP_FULL_STYLE, textTransform: 'none', fontSize: MATCHUP_FULL, lineHeight: 1.15,
-          position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none',
-        }}>
-          {fullA} vs {fullB}
+      {next ? (
+        <>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-4 py-4">
+            <Side team={next.my_team} />
+            <div className="text-center">
+              <div className="text-xl font-black tabular-nums sm:text-2xl">{at ? clock(at) : 'TBC'}</div>
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{at ? at.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) : 'Time to be confirmed'}</div>
+            </div>
+            <Side team={next.opponent} />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
+            <span className="min-w-0 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <span aria-hidden>{iconOf(next.sport)} </span>{[next.sport, next.discipline, next.round].filter(Boolean).join(' · ')}
+            </span>
+            <button type="button" onClick={onOpen} className={PILL_TEAL}>Open match<ArrowRight size={14} aria-hidden /></button>
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col items-center gap-3 px-4 py-5 text-center">
+          <div className="flex items-center gap-3" aria-hidden>
+            <span className="h-10 w-10 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600" />
+            <span className="text-xs font-black text-slate-400">VS</span>
+            <span className="h-10 w-10 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600" />
+          </div>
+          <div>
+            <div className="text-sm font-black">No fixture yet</div>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Your next match shows here once it is scheduled.</p>
+          </div>
+          {emptyAction}
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginTop: 16, fontSize: 13.5, color: C.brandSoft, position: 'relative' }}>
-        {meta.map((t) => <span key={t}>{t}</span>)}
-      </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 22, position: 'relative' }}>
-        <button
-          onClick={() => nav(`/profile/matches/${m.id}`)}
-          style={{ padding: '11px 18px', border: 'none', borderRadius: 10, background: '#fff', color: C.blue, fontFamily: POP, fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
-          Open match
-        </button>
-        {m.championship && (
-          <button
-            onClick={() => nav(`/championships/${m.championship!.id}`)}
-            style={{ padding: '11px 18px', border: '1px solid rgba(255,255,255,.35)', borderRadius: 10, background: 'transparent', color: '#fff', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}>
-            {m.championship.name}
-          </button>
-        )}
+      )}
+    </div>
+  );
+}
+
+/** A one-line placeholder for a card in the "right now" row, short enough not to stretch its neighbour. */
+function SlimEmpty({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
+  return (
+    <div className="flex flex-1 items-center gap-3 px-4 py-5">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800" aria-hidden><Icon size={18} /></span>
+      <span className="min-w-0">
+        <span className="block text-sm font-black text-slate-800 dark:text-slate-100">{title}</span>
+        <span className="block text-xs text-slate-500 dark:text-slate-400">{text}</span>
+      </span>
+    </div>
+  );
+}
+
+/** The player's season along the foot of the hero, like a broadcast stat band. */
+function SeasonBand({ stats, winRate, teams, form }: { stats: Home['stats']; winRate: number | null; teams: number; form: Match[] }) {
+  const figures: Array<[string, ReactNode]> = [
+    ['Events', stats.events], ['Games', stats.games], ['Wins', stats.wins],
+    ['Win rate', winRate == null ? '-' : `${winRate}%`], ['Sports', stats.sports], ['Teams', teams],
+  ];
+  return (
+    // Phones: two rows of three (6-col grid); desktop: one row of six, then form.
+    <div className="relative grid grid-cols-6 border-t border-white/10 bg-black/25 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
+      {figures.map(([k, v], i) => (
+        <div key={k} className={cn('col-span-2 min-w-0 border-r border-white/10 px-3 py-3 sm:px-4 lg:col-span-1 lg:px-3 xl:px-5', i >= 3 && 'border-t lg:border-t-0')}>
+          <div className="text-xl font-black tabular-nums sm:text-2xl">{v}</div>
+          <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">{k}</div>
+        </div>
+      ))}
+      <div className="col-span-6 flex items-center gap-2 border-t border-white/10 px-3 py-2.5 sm:px-4 lg:col-span-1 lg:border-t-0 xl:px-5">
+        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">Form</span>
+        {form.length ? form.map((r) => (
+          <span key={r.id} title={lookOf(r.result).label} className={cn('grid h-6 w-6 place-items-center rounded-md text-[11px] font-black', lookOf(r.result).chip)}>{lookOf(r.result).letter}</span>
+        )) : <span className="text-xs text-white/45">No results yet</span>}
       </div>
     </div>
+  );
+}
+
+function CardTitle({ icon: Icon, title, sub, tone = 'brand' }: { icon: LucideIcon; title: string; sub?: string; tone?: 'brand' | 'amber' | 'rose' }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-xl',
+        tone === 'amber' ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300'
+          : tone === 'rose' ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300'
+            : TEAL_TILE)}><Icon size={16} aria-hidden /></span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-black text-slate-900 dark:text-slate-100">{title}</span>
+        {sub && <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{sub}</span>}
+      </span>
+    </span>
+  );
+}
+
+/** "View all (12)" / "Show less" for a capped list. */
+function MoreToggle({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
+  if (total <= ROW_LIMIT) return null;
+  return (
+    <button type="button" onClick={onToggle}
+      className="w-full border-t border-slate-100 py-2.5 text-center text-[13px] font-semibold text-[var(--accent-deep)] transition hover:bg-slate-50 dark:border-slate-800 dark:text-[var(--accent)] dark:hover:bg-slate-800/40">
+      {expanded ? 'Show less' : `View all (${total})`}
+    </button>
   );
 }
 
 export function MyGamePage() {
   const { ctx } = useAuth();
   const { data, isLoading } = useApi<Home>('/me/home');
+  const { data: catalogue = [] } = useApi<Array<{ name: string; icon?: string | null }>>('/sports');
   const nav = useNavigate();
-  // One flag per list - independent, since expanding "Live now" has nothing to do
-  // with wanting the full "Recent results".
-  const [expandedLive, setExpandedLive] = useState(false);
-  const [expandedPending, setExpandedPending] = useState(false);
-  const [expandedTeams, setExpandedTeams] = useState(false);
-  const [expandedRecent, setExpandedRecent] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggle = (k: string) => setExpanded((e) => ({ ...e, [k]: !e[k] }));
   // The title lives in the top bar, as on the organisation pages.
   usePageTitle('My Game');
 
-  if (isLoading) return <Spinner />;
-  const d = data ?? { next: null, live: [], pending: [], recent: [], teams: [], stats: { games: 0, events: 0, sports: 0, wins: 0 } };
+  const iconOf = useMemo(() => {
+    const m = new Map(catalogue.map((s) => [s.name.toLowerCase(), s.icon || '🏅']));
+    return (sport: string | null) => (sport ? m.get(sport.toLowerCase()) ?? '🏅' : '🏅');
+  }, [catalogue]);
 
   const first = ctx?.user?.name?.split(' ')[0];
-  const stats: Array<[string, number]> = [
-    ['Games', d.stats.games], ['Events', d.stats.events],
-    ['Sports', d.stats.sports], ['Wins', d.stats.wins],
-  ];
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+
+  if (isLoading) return <MyGameSkeleton />;
+  const d = data ?? { next: null, live: [], pending: [], recent: [], teams: [], stats: { games: 0, events: 0, sports: 0, wins: 0 } };
+  // Over decided matches (W + D + L), as on the profile: a ranking event has no result to win.
+  const decided = d.stats.wins + (d.stats.draws ?? 0) + (d.stats.losses ?? 0);
+  const winRate = decided ? Math.round((d.stats.wins / decided) * 100) : null;
+  // Newest first from the API; the form guide reads left to right, oldest to newest.
+  const form = d.recent.filter((r) => r.result && r.result !== 'pending').slice(0, 5).reverse();
+  const n = d.next;
+  const liveTotal = d.live_total ?? d.live.length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* No big heading - "My Game" is in the top bar; the short description stays. */}
-      <p className="t-meta" style={{ margin: 0 }}>Everything you are playing, officiating and owed.</p>
-
-      {/* hero + activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: 16 }} className="mg-top">
-        {d.next ? <NextGameHero m={d.next} /> : <NoNextGame />}
-
-        <div style={card}>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: C.fg4 }}>
-            My activity
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 16 }}>
-            {stats.map(([k, v]) => (
-              <div key={k} style={{ padding: '12px 14px', background: C.ground, borderRadius: 10 }}>
-                <div style={{ fontFamily: MONO, fontWeight: 700, fontSize: 24, color: C.navy, fontVariantNumeric: 'tabular-nums' }}>{v}</div>
-                <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: C.fg4, marginTop: 3 }}>{k}</div>
+    <div className="space-y-5 pb-16">
+      {/* Matchday: who you are, your next fixture, and your season along the foot. */}
+      <section className="relative overflow-hidden rounded-2xl bg-[#0a1630] text-white shadow-lg">
+        <HeroTexture />
+        <div className="relative grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center">
+          <div className="flex min-w-0 items-center gap-4">
+            <PlayerBadge className="max-sm:hidden" name={ctx?.user?.name ?? ''} photo={ctx?.user?.avatar_url}
+              number={ctx?.user?.jersey_number} />
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">Matchday · {today}</div>
+              <h1 className="mt-0.5 text-2xl font-black leading-tight sm:text-3xl">{greeting()}{first ? `, ${first}` : ''}</h1>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-semibold text-white/85">
+                {[`${d.teams.length} squad${d.teams.length === 1 ? '' : 's'}`, `${d.stats.sports} sport${d.stats.sports === 1 ? '' : 's'}`, `${d.stats.events} event${d.stats.events === 1 ? '' : 's'}`].map((c) => (
+                  <span key={c} className="rounded-full bg-white/10 px-2.5 py-0.5 ring-1 ring-white/15">{c}</span>
+                ))}
+                {liveTotal > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500 px-2.5 py-0.5 font-bold text-white"><LiveDot className="h-1.5 w-1.5" />{liveTotal} live</span>}
               </div>
-            ))}
-          </div>
-          {/* Said plainly, because a counter that quietly excludes half your matches
-              is worse than one that explains itself. */}
-          <p style={{ margin: '14px 0 0', fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>
-            Counted from completed matches only.
-          </p>
-        </div>
-      </div>
-
-      {/* live / pending / teams */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(225px,1fr))', gap: 16 }}>
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: C.bad }} />
-            <span style={{ fontFamily: POP, fontWeight: 800, fontSize: 15 }}>Live now</span>
-          </div>
-          {d.live.length === 0
-            ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Nothing of yours is being played right now.</p>
-            : (expandedLive ? d.live : d.live.slice(0, ROW_LIMIT)).map((g) => (
-              <div key={g.id} onClick={() => nav(`/profile/matches/${g.id}`)} role="button" tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && nav(`/profile/matches/${g.id}`)}
-                style={{ cursor: 'pointer', padding: '11px 12px', borderRadius: 10, background: C.blue50, marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: POP, fontWeight: 700, fontSize: 13.5 }}>
-                  <span>{g.my_team?.name ?? 'My team'}</span>
-                  <span style={{ fontFamily: MONO, color: C.blue }}>{g.my_score != null ? formatPoints(g.my_score) : '–'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: POP, fontWeight: 700, fontSize: 13.5, color: C.fg3, marginTop: 4 }}>
-                  <span>{g.opponent?.name ?? 'TBC'}</span>
-                  <span style={{ fontFamily: MONO }}>{g.opp_score != null ? formatPoints(g.opp_score) : '–'}</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 6 }}>{[g.sport, g.championship?.name].filter(Boolean).join(' · ')}</div>
-              </div>
-            ))}
-          <ViewToggle total={d.live.length} shown={ROW_LIMIT} expanded={expandedLive} onToggle={() => setExpandedLive((v) => !v)} />
-        </div>
-
-        <div style={card}>
-          <div style={cardTitle}>Pending actions</div>
-          {d.pending.length === 0
-            ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Nothing needs you right now.</p>
-            : (expandedPending ? d.pending : d.pending.slice(0, ROW_LIMIT)).map((p) => (
-              <div key={p.id} onClick={() => nav(`/score/${p.id}`)} role="button" tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && nav(`/score/${p.id}`)}
-                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `1px solid ${C.surface}` }}>
-                <span aria-hidden style={{
-                  width: 26, height: 26, borderRadius: 8, background: C.warnSoft, color: C.warn,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
-                }}>!</span>
-                <span style={{ flex: 1, fontSize: 13.5, color: C.fg2 }}>
-                  {p.reason} - {[p.sport, p.championship?.name].filter(Boolean).join(' · ')}
-                </span>
-                <span aria-hidden style={{ color: C.faint }}>›</span>
-              </div>
-            ))}
-          <ViewToggle total={d.pending.length} shown={ROW_LIMIT} expanded={expandedPending} onToggle={() => setExpandedPending((v) => !v)} />
-        </div>
-
-        <div style={card}>
-          <div style={cardTitle}>My teams</div>
-          {d.teams.length === 0 ? (
-            <div style={{ border: `1px dashed ${C.line2}`, borderRadius: 12, padding: '22px 18px', textAlign: 'center' }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.fg3 }}>You are not in a squad yet</div>
-              <div style={{ fontSize: 12.5, color: C.faint, marginTop: 6, lineHeight: 1.55 }}>
-                Join an organisation or enter an event, and the teams you play for appear here.
-              </div>
-              <Link to="/discover" style={{ display: 'inline-block', marginTop: 12, fontFamily: POP, fontWeight: 700, fontSize: 12.5, color: C.blue, textDecoration: 'none' }}>
-                Find something to play →
-              </Link>
             </div>
+          </div>
+          <FixtureCard next={n} iconOf={iconOf}
+            onOpen={() => n && nav(`/profile/matches/${n.id}`)}
+            emptyAction={d.teams.length
+              ? <Link to="/profile/matches" className={PILL_TEAL}><CalendarClock size={14} aria-hidden />My matches</Link>
+              : <Link to="/discover" className={PILL_TEAL}><Compass size={14} aria-hidden />Find an event</Link>} />
+        </div>
+        <SeasonBand stats={d.stats} winRate={winRate} teams={d.teams.length} form={form} />
+      </section>
+
+      {/* Right now: only when something is live or waiting on you. Both cards show
+          together, an empty one with a placeholder, so the row never sits half blank. */}
+      {(d.live.length > 0 || d.pending.length > 0) && (
+        // Each card keeps its own height, so an empty one never stretches into a blank block.
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          {d.live.length === 0 ? (
+            <section className={cn(CARD, 'flex flex-col')}>
+              <div className={CARD_HEAD}>
+                <span className="flex items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-200 px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">Live</span>
+                  <span className="text-sm font-black text-slate-900 dark:text-slate-100">Playing now</span>
+                </span>
+              </div>
+              <SlimEmpty icon={CalendarClock} title="Nothing live right now" text="Your squads' matches show here the moment one kicks off." />
+            </section>
           ) : (
-            <>
-              {(expandedTeams ? d.teams : d.teams.slice(0, ROW_LIMIT)).map((t) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `1px solid ${C.surface}` }}>
-                  <span aria-hidden style={{
-                    width: 28, height: 28, borderRadius: 8, background: C.brandSoft, color: C.blue,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: POP, fontWeight: 700, fontSize: 11,
-                  }}>{initials(t.organization ?? t.name)}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 2 }}>{[t.organization, t.sport].filter(Boolean).join(' · ')}</div>
-                  </div>
-                  <span style={{
-                    fontFamily: MONO, fontSize: 9.5, letterSpacing: '.06em', textTransform: 'uppercase',
-                    padding: '3px 7px', borderRadius: 999, background: C.surface, color: C.fg3,
-                  }}>{t.role}</span>
-                </div>
-              ))}
-              <ViewToggle total={d.teams.length} shown={ROW_LIMIT} expanded={expandedTeams} onToggle={() => setExpandedTeams((v) => !v)} />
-            </>
+            <section className={cn(CARD, 'border-rose-200 dark:border-rose-500/30')}>
+              <div className={cn(CARD_HEAD, 'bg-rose-50/60 dark:bg-rose-500/5')}>
+                <span className="flex items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-500 px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-white"><LiveDot className="h-1.5 w-1.5" />Live</span>
+                  <span className="text-sm font-black text-slate-900 dark:text-slate-100">Playing now</span>
+                </span>
+                <span className="text-xs font-semibold text-rose-600 dark:text-rose-300">{liveTotal} match{liveTotal === 1 ? '' : 'es'}</span>
+              </div>
+              <ul>
+                {d.live.slice(0, LIVE_LIMIT).map((g) => (
+                  <li key={g.id}>
+                    <button type="button" onClick={() => nav(`/profile/matches/${g.id}`)}
+                      className="group flex w-full items-center gap-3 border-t border-slate-100 px-4 py-3 text-left transition first:border-t-0 hover:bg-rose-50/40 dark:border-slate-800 dark:hover:bg-rose-500/5">
+                      <span className="min-w-0 flex-1 space-y-2">
+                        <Scoreline m={g} live />
+                        <MatchMeta m={g} iconOf={iconOf} />
+                      </span>
+                      <ChevronRight size={16} className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-rose-500" aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {/* Two at most here; the rest wait on All matches' Live tab rather than stretching this card. */}
+              {liveTotal > LIVE_LIMIT && (
+                <Link to="/profile/matches?view=live" className="block w-full border-t border-rose-100 py-2.5 text-center text-[13px] font-semibold text-rose-600 transition hover:bg-rose-50/60 dark:border-rose-500/20 dark:text-rose-300 dark:hover:bg-rose-500/10">
+                  View all {liveTotal} live
+                </Link>
+              )}
+            </section>
+          )}
+          {d.pending.length === 0 ? (
+            <section className={cn(CARD, 'flex flex-col')}>
+              <div className={CARD_HEAD}><CardTitle icon={ClipboardPen} tone="amber" title="Waiting on you" sub="Matches you are scoring" /></div>
+              <SlimEmpty icon={ClipboardPen} title="You're all caught up" text="Scorecards you need to finish or get locked show up here." />
+            </section>
+          ) : (
+            <section className={cn(CARD, 'border-amber-200 dark:border-amber-500/30')}>
+              <div className={cn(CARD_HEAD, 'bg-amber-50/60 dark:bg-amber-500/5')}>
+                <CardTitle icon={ClipboardPen} tone="amber" title="Waiting on you" sub="Matches you are scoring" />
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{d.pending.length} to finish</span>
+              </div>
+              <ul>
+                {(expanded.pending ? d.pending : d.pending.slice(0, ROW_LIMIT)).map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 dark:border-slate-800">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-50 text-xl dark:bg-slate-800/60" aria-hidden>{iconOf(p.sport)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="truncate text-sm font-black text-slate-900 dark:text-slate-100">{p.my_team?.name ?? 'TBC'} <span className="font-semibold text-slate-400">vs</span> {p.opponent?.name ?? 'TBC'}</span>
+                      </span>
+                      <MatchMeta m={p} iconOf={() => ''} />
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">{p.reason ?? 'Needs your attention'}</span>
+                    </span>
+                    <button type="button" onClick={() => nav(`/score/${p.id}`)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-400 px-3.5 py-1.5 text-[13px] font-black text-amber-950 shadow-sm shadow-amber-500/20 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50">
+                      Open<ArrowRight size={13} aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <MoreToggle total={d.pending.length} expanded={!!expanded.pending} onToggle={() => toggle('pending')} />
+            </section>
           )}
         </div>
-      </div>
+      )}
 
-      {/* recent results */}
-      <div style={{ ...card, padding: 20 }}>
-        <div style={cardTitle}>Recent results</div>
-        {d.recent.length === 0
-          ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Your results will appear here once you have played.</p>
-          : (expandedRecent ? d.recent : d.recent.slice(0, ROW_LIMIT)).map((r) => {
-            const won = r.result === 'won', lost = r.result === 'lost';
-            return (
-              <div key={r.id} onClick={() => nav(`/profile/matches/${r.id}`)} role="button" tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && nav(`/profile/matches/${r.id}`)}
-                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: `1px solid ${C.surface}` }}>
-                <span style={{
-                  fontFamily: MONO, fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', padding: '4px 8px', borderRadius: 999,
-                  background: won ? C.okSoft : lost ? C.badSoft : C.surface,
-                  color: won ? C.ok : lost ? C.bad : C.fg3,
-                }}>{(r.result ?? 'played').toUpperCase()}</span>
-                <span style={{ fontFamily: MONO, fontSize: 13, color: C.navy, minWidth: 62 }}>
-                  {r.my_score != null ? formatPoints(r.my_score) : '–'} · {r.opp_score != null ? formatPoints(r.opp_score) : '–'}
-                  {r.pens && <span style={{ display: 'block', fontSize: 10, color: C.fg3 }} title="Penalty shoot-out">{r.pens[0]}–{r.pens[1]} pens</span>}
-                  {r.settled && <span style={{ display: 'block', fontSize: 10, color: C.fg3 }} title={KHO_END_LABEL[r.settled]}>{KHO_END_SHORT[r.settled]}</span>}
-                </span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {r.my_team?.name} vs {r.opponent?.name ?? 'TBC'}
-                </span>
-                <span style={{ fontSize: 12, color: C.fg4, whiteSpace: 'nowrap' }}>{r.championship?.name}</span>
-              </div>
-            );
-          })}
-        <ViewToggle total={d.recent.length} shown={ROW_LIMIT} expanded={expandedRecent} onToggle={() => setExpandedRecent((v) => !v)} />
-      </div>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        {/* Recent results: scorelines, newest first, each tagged with how it went. */}
+        <section className={cn(CARD, 'flex flex-col')}>
+          <div className={CARD_HEAD}>
+            <CardTitle icon={Medal} title="Recent results" sub={d.recent.length ? `Your last ${d.recent.length}` : 'Nothing played yet'} />
+            <Link to="/profile/matches" className={PILL_GHOST}>
+              All matches<ChevronRight size={14} aria-hidden />
+            </Link>
+          </div>
+          {d.recent.length === 0 ? (
+            <EmptyState bare compact icon={<Medal size={22} />} title="No results yet" description="Your results show up here as soon as you have played." />
+          ) : (
+            <>
+              <ul>
+                {(expanded.recent ? d.recent : d.recent.slice(0, ROW_LIMIT)).map((r) => {
+                  const look = lookOf(r.result);
+                  return (
+                    <li key={r.id}>
+                      <button type="button" onClick={() => nav(`/profile/matches/${r.id}`)}
+                        className="group flex w-full items-center gap-3 border-t border-slate-100 px-4 py-3 text-left transition first:border-t-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-800/30">
+                        <DayTile iso={r.scheduled_at} />
+                        <span className="min-w-0 flex-1 space-y-2">
+                          <Scoreline m={r} />
+                          <MatchMeta m={r} iconOf={iconOf} />
+                        </span>
+                        <span className="flex w-16 shrink-0 flex-col items-end gap-1 text-right">
+                          <span className={cn('rounded-md px-2 py-0.5 text-[11px] font-black uppercase tracking-wider ring-1', RESULT_TAG[r.result ?? ''] ?? RESULT_TAG.draw)}>{look.label}</span>
+                          {r.pens && <span className="text-[10px] font-semibold text-slate-400" title="Penalty shoot-out">{r.pens[0]}-{r.pens[1]} pens</span>}
+                          {r.settled && <span className="text-[10px] font-semibold text-slate-400" title={KHO_END_LABEL[r.settled]}>{KHO_END_SHORT[r.settled]}</span>}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <MoreToggle total={d.recent.length} expanded={!!expanded.recent} onToggle={() => toggle('recent')} />
+            </>
+          )}
+        </section>
 
-      <style>{`@media (max-width: 860px){ .mg-top{ grid-template-columns: 1fr !important } }`}</style>
+        <aside className="space-y-5">
+          {/* My teams: the squads you play for right now. */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}><CardTitle icon={Users} title="My teams" sub={d.teams.length ? `${d.teams.length} squad${d.teams.length === 1 ? '' : 's'}` : 'Not in a squad yet'} /></div>
+            {d.teams.length === 0 ? (
+              <EmptyState bare compact icon={<Users size={22} />} title="You are not in a squad yet"
+                description="Join an organisation or enter an event, and the teams you play for appear here."
+                action={<Link to="/discover" className="!bg-[var(--accent)] !text-slate-950"><Compass size={14} aria-hidden />Find something to play</Link>} />
+            ) : (
+              <>
+                <ul>
+                  {d.teams.slice(0, ROW_LIMIT).map((t) => {
+                    const captain = t.role === 'captain';
+                    return (
+                      <li key={t.id} className="flex items-center gap-3 border-t border-slate-100 px-4 py-2.5 first:border-t-0 dark:border-slate-800">
+                        <span className="relative shrink-0">
+                          <TeamAvatar name={t.name ?? t.organization} short={t.organization} />
+                          <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-white text-[11px] shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700" aria-hidden>{iconOf(t.sport)}</span>
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-bold text-slate-800 dark:text-slate-100">{t.name ?? t.organization ?? 'Team'}</span>
+                          {/* The organisation only when it isn't already the title. */}
+                          <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{[t.sport, t.organization && t.organization !== (t.name ?? t.organization) ? t.organization : null].filter(Boolean).join(' · ')}</span>
+                        </span>
+                        <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider',
+                          captain ? 'bg-[var(--accent)] text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+                          {captain && <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-slate-950 text-[8px] text-[var(--accent)]" aria-hidden>C</span>}
+                          {t.role.replace(/_/g, ' ')}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {/* The full list lives on the profile's Teams tab; expanding here stretched both columns. */}
+                {d.teams.length > ROW_LIMIT && (
+                  <Link to="/profile?tab=teams" className="block w-full border-t border-slate-100 py-2.5 text-center text-[13px] font-semibold text-[var(--accent-deep)] transition hover:bg-slate-50 dark:border-slate-800 dark:text-[var(--accent)] dark:hover:bg-slate-800/40">
+                    View all ({d.teams.length})
+                  </Link>
+                )}
+              </>
+            )}
+          </section>
+
+          {/* Where to go next from here. */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}><CardTitle icon={ArrowRight} title="Jump to" /></div>
+            <div className="grid grid-cols-2 gap-2 p-3">
+              {([[Compass, 'Discover', 'Find events', '/discover'], [CalendarClock, 'My matches', 'Every fixture', '/profile/matches'],
+                [Trophy, 'My events', 'Where you play', '/championships'], [Medal, 'Achievements', 'Awards, certificates', '/profile/achievements']] as Array<[LucideIcon, string, string, string]>).map(([Icon, label, hint, to]) => (
+                <Link key={to} to={to}
+                  className="group flex min-w-0 items-center gap-2.5 rounded-xl border border-slate-100 p-2.5 transition hover:border-[var(--accent-deep)]/30 hover:bg-[var(--accent)]/10 dark:border-slate-800">
+                  <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg transition group-hover:bg-[var(--accent)] group-hover:text-slate-950', TEAL_TILE)}><Icon size={15} aria-hidden /></span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-bold text-slate-800 dark:text-slate-100">{label}</span>
+                    <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{hint}</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

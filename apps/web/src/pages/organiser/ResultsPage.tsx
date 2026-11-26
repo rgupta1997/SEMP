@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  ChevronRight, Clock, Eye, Flag, Lock, LockOpen, Pencil, Radio, ShieldCheck,
+  BarChart3, ChevronRight, Clock, Eye, Flag, ListChecks, Lock, LockOpen, Pencil, Radio, ShieldCheck,
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,7 @@ import { useApi } from '../../lib/hooks';
 import {
   Button, Card, EmptyState, Modal, Segmented, Select, Spinner, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
-import { GroupTables, TallyTabLabel } from '../../components/GroupTables';
+import { GroupTables, TallyTieBadge } from '../../components/GroupTables';
 import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../../components/TitleTally';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
 import { BackToTop } from '../../components/BackToTop';
@@ -787,13 +787,13 @@ export function ResultsPage() {
                       </div>
                     </div>
                     {hasTally(g.drawId) && (
-                      <Segmented size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
+                      <ViewTabs size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
                         onChange={(v) => setTally(g.drawId!, v === 'tally')}
-                        options={[{ value: 'matches', label: 'Matches' }, {
-                          value: 'tally',
-                          // Event tallies have no group ties, so only table draws can carry the dot.
-                          label: eventTallyOf(g.drawId!) ? 'Point tally'
-                            : <TallyTabLabel drawId={g.drawId!} canManage={canManageSport(g.sportId) && !archived} />,
+                        options={[{ value: 'matches', label: 'Matches', icon: ListChecks }, {
+                          value: 'tally', label: 'Point tally', icon: BarChart3,
+                          // Event tallies have no group ties, so only table draws can carry the tag.
+                          badge: eventTallyOf(g.drawId!) ? undefined
+                            : <TallyTieBadge drawId={g.drawId!} canManage={canManageSport(g.sportId) && !archived} active={tallyOpen.has(g.drawId!)} />,
                         }]} />
                     )}
                   </div>

@@ -1,25 +1,23 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ChevronDown, Medal, RotateCw, ShieldCheck, Trophy, X } from 'lucide-react';
 import { isRankingSport, type MatchPosition } from '@semp/shared';
-import { useApi } from '../../lib/hooks';
-import { Card, CardBody, CardHeader, EmptyState, Select, Spinner } from '../../components/ui';
+import { useApi, fmtDate } from '../../lib/hooks';
+import { EmptyState, PILL_PICK, cn } from '../../components/ui';
+import { PickList } from '../../components/PickList';
+import { ViewTabs } from '../schedule/ScheduleParts';
+import { useSportIcon } from '../personal/SportFilter';
 
 // ============================================================================
 // A person's record, by sport - and NOT as one undifferentiated number.
 //
 // Every sport shows the combined record first, then the tiers that make it up:
 // INTER (against other institutions) and INTRA (between departments or campuses of
-// one). Adding those together is the thing a career page must not do - a hundred
-// against another university and a hundred in an inter-hostel game are not the same
-// hundred, which is why cricket has kept first-class, List A and T20 apart for a
-// century.
+// one). Adding those together is the thing a career page must not do.
 //
-// The rollup is READ from the server, never summed here. It is stored alongside its
-// parts in the same transaction, so a screen that recomputed it could only ever
-// disagree with the source.
+// The rollup is READ from the server, never summed here: it is stored alongside its
+// parts in the same transaction, so a screen that recomputed it could only disagree.
 //
-// Disciplines sit under their sport, collapsed. "How do I do in singles" is a real
-// question and a different one from "how do I do at table tennis", but it is the
-// second question, so it is one click away rather than in the way of the first.
+// Disciplines sit under their sport, collapsed - the second question, one click away.
 // ============================================================================
 
 interface Metric {
@@ -69,78 +67,77 @@ interface Payload {
   filters: Array<{ sportId: string; sport: string; disciplines: Array<{ id: string; name: string }> }>;
 }
 
+const LABEL = 'text-[10px] font-black uppercase tracking-[0.14em] text-slate-400';
+const TOGGLE = 'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:text-[var(--accent-deep)] hover:ring-[var(--accent-deep)]/40 dark:text-slate-200 dark:ring-slate-700';
+const MEDAL_TONE = { gold: 'text-amber-500', silver: 'text-slate-400', bronze: 'text-orange-600' } as const;
+
 const fmt = (m: Metric) =>
   m.text ?? (m.percent ? `${m.value}%` : `${m.value}${m.notOut ? '*' : ''}`);
 
-// Null (not 0%) with nothing played yet - "always loses" and "hasn't
-// competed" aren't the same fact. Capped at 100: `played` is per FIXTURE but
-// medals are per RACE, so a multi-race meet can out-medal its fixture count.
+// Null (not 0%) with nothing played yet - "always loses" and "hasn't competed" aren't the
+// same fact. Capped at 100: `played` is per FIXTURE but medals are per RACE.
 const podiumPct = (r: TierRecord): number | null =>
   r.played > 0 ? Math.min(100, Math.round(((r.gold + r.silver + r.bronze) / r.played) * 1000) / 10) : null;
 
-// A ranking event has no opponent to beat, so W-L-D doesn't describe it -
-// podium rate (how often they medal) is the question it actually answers.
-function Record({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
+/** The record as chips: played, then W / L / D in colour - or podium rate for a ranking sport,
+ *  which has no opponent to beat. */
+function Record({ r, ranking, size = 'md' }: { r: TierRecord; ranking?: boolean; size?: 'md' | 'sm' }) {
+  const chip = cn('inline-flex items-center rounded-md font-black tabular-nums', size === 'md' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-px text-[11px]');
   const pct = ranking ? podiumPct(r) : null;
   return (
-    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-      <b>{r.played}</b> played
-      <span style={{ color: 'var(--ink-4)' }}>
-        {ranking
-          ? (pct != null ? `  ·  ${pct}% podium` : '')
-          : <>{'  ·  '}{r.won}W {r.lost}L{r.drawn > 0 ? ` ${r.drawn}D` : ''}{r.winPct != null ? `  ·  ${r.winPct}%` : ''}</>}
-      </span>
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className={cn(chip, 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200')}>{r.played} played</span>
+      {ranking ? (pct != null && <span className={cn(chip, 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200')}>{pct}% podium</span>) : (
+        <>
+          <span className={cn(chip, 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300')}>{r.won}W</span>
+          <span className={cn(chip, 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300')}>{r.lost}L</span>
+          {r.drawn > 0 && <span className={cn(chip, 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>{r.drawn}D</span>}
+        </>
+      )}
     </span>
   );
 }
 
 function Medals({ r }: { r: TierRecord }) {
-  const bits = [
-    r.gold ? `${r.gold} gold` : null,
-    r.silver ? `${r.silver} silver` : null,
-    r.bronze ? `${r.bronze} bronze` : null,
-    r.awards ? `${r.awards} award${r.awards === 1 ? '' : 's'}` : null,
-  ].filter(Boolean);
-  if (!bits.length) return null;
-  return <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginTop: 2 }}>{bits.join(' · ')}</div>;
+  if (!r.gold && !r.silver && !r.bronze && !r.awards) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2.5 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">
+      {(['gold', 'silver', 'bronze'] as const).map((m) => r[m] > 0 && (
+        <span key={m} className="inline-flex items-center gap-0.5" title={`${r[m]} ${m}`}><Medal size={14} className={MEDAL_TONE[m]} aria-hidden />{r[m]}</span>
+      ))}
+      {r.awards > 0 && <span className="inline-flex items-center gap-0.5 text-violet-600 dark:text-violet-300"><Trophy size={13} aria-hidden />{r.awards} award{r.awards === 1 ? '' : 's'}</span>}
+    </span>
+  );
 }
 
-/** The sport's own measures. Empty is normal - not every result records them. */
+/** The sport's own measures, as soft tiles. Empty is normal - not every result records them. */
 function Metrics({ metrics, dense }: { metrics: Metric[]; dense?: boolean }) {
   if (!metrics.length) return null;
   const shown = dense ? metrics.filter((m) => m.headline).slice(0, 6) : metrics;
   if (!shown.length) return null;
   return (
-    <div style={{
-      display: 'grid', gap: 1, marginTop: 10,
-      gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 104 : 128}px, 1fr))`,
-      background: 'var(--line)', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden',
-    }}>
+    <div className={cn('mt-3 grid gap-2', dense ? 'grid-cols-[repeat(auto-fill,minmax(96px,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(120px,1fr))]')}>
       {shown.map((m) => (
-        // --surface-1 flips with the theme; the old --bg-1 never existed, so tiles stayed
-        // white in dark mode under light ink.
-        <div key={m.key} style={{ background: 'var(--surface-1)', padding: '8px 10px' }}>
-          <div style={{
-            fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
-            color: m.higherIsBetter === false ? 'var(--ink-3)' : 'var(--ink)',
-          }}>{fmt(m)}</div>
-          <div style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.3 }}>{m.label}</div>
+        <div key={m.key} className="min-w-0 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+          <div className={cn('font-black tabular-nums', dense ? 'text-base' : 'text-lg', m.higherIsBetter === false ? 'text-slate-500 dark:text-slate-400' : 'text-slate-900 dark:text-slate-100')}>{fmt(m)}</div>
+          <div className="text-[11px] font-semibold leading-tight text-slate-500 dark:text-slate-400">{m.label}</div>
         </div>
       ))}
     </div>
   );
 }
 
-/** One tier row under a sport. */
+/** One competition level under a sport. */
 function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   return (
-    <div style={{ padding: '10px 0', borderTop: '1px solid var(--line)' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', alignItems: 'baseline' }}>
-        <span style={{ fontSize: 13, fontWeight: 600, minWidth: 150 }}>{r.label}</span>
-        <span style={{ fontSize: 13.5 }}><Record r={r} ranking={ranking} /></span>
+    <div className="border-t border-slate-100 py-3 first:border-t-0 dark:border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0">
+          <span className="block text-sm font-bold text-slate-800 dark:text-slate-100">{r.label}</span>
+          {r.hint && <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.hint}</span>}
+        </span>
+        <span className="flex flex-wrap items-center gap-3"><Medals r={r} /><Record r={r} ranking={ranking} size="sm" /></span>
       </div>
-      {r.hint && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 1 }}>{r.hint}</div>}
-      <Medals r={r} />
       <Metrics metrics={r.metrics} dense />
     </div>
   );
@@ -157,7 +154,7 @@ interface InsightItem {
 /** A small tag on an insight built on little data, so it is read as a hint, not a verdict. */
 const EarlySign = () => (
   <span title="Based on only a little data so far - it may change as more matches are played"
-    style={{ marginLeft: 6, padding: '0 5px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--ink-4)', border: '1px solid var(--line)', whiteSpace: 'nowrap' }}>
+    className="ml-1.5 whitespace-nowrap rounded-md px-1.5 py-px text-[9px] font-black uppercase tracking-wider text-slate-500 ring-1 ring-slate-200 dark:text-slate-400 dark:ring-slate-700">
     early sign
   </span>
 );
@@ -166,6 +163,14 @@ interface InsightReport {
   strengths: InsightItem[]; weaknesses: InsightItem[]; trends: InsightItem[];
   form: Array<'W' | 'L' | 'D'>;
 }
+
+const FORM_CHIP: Record<string, string> = { W: 'bg-emerald-500 text-white', L: 'bg-rose-500 text-white', D: 'bg-slate-400 text-white' };
+const TONE = {
+  strength: { mark: '✓', cls: 'text-emerald-600 dark:text-emerald-400' },
+  weakness: { mark: '!', cls: 'text-rose-500' },
+  up: { mark: '▲', cls: 'text-emerald-600 dark:text-emerald-400' },
+  down: { mark: '▼', cls: 'text-rose-500' },
+} as const;
 
 /** Plain-word insights; the card flips to show the counts and rule behind each, so none is taken on trust. */
 function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: string; view: PlayView }) {
@@ -185,55 +190,40 @@ function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: str
   };
   if (!data) return null;
   if (!data.enoughData) {
-    return (
-      <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginBottom: 12 }}>
-        Insights appear after a few more {view === 'all' ? '' : `${view} `}results.
-      </div>
-    );
+    return <p className="mb-3 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700">Insights appear after a few more {view === 'all' ? '' : `${view} `}results.</p>;
   }
-  const block = (title: string, items: InsightItem[], mark: (i: InsightItem) => string, colour: (i: InsightItem) => string) =>
-    items.length > 0 && (
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 4 }}>{title}</div>
-        {items.map((i) => (
-          <div key={i.key} style={{ display: 'flex', gap: 6, fontSize: 13, lineHeight: 1.45, marginBottom: 3 }}>
-            <span style={{ color: colour(i), fontWeight: 700 }}>{mark(i)}</span>
-            <span>{i.text}{i.early && <EarlySign />}</span>
-          </div>
-        ))}
-      </div>
-    );
-  const good = 'var(--success, #059669)';
-  const bad = 'var(--danger, #e11d48)';
-  const markOf = (i: InsightItem) => (i.tone === 'strength' ? '✓' : i.tone === 'weakness' ? '!' : i.tone === 'up' ? '▲' : '▼');
-  const colourOf = (i: InsightItem) => (i.tone === 'strength' || i.tone === 'up' ? good : bad);
+  const block = (title: string, items: InsightItem[], tint: string) => items.length > 0 && (
+    <div className={cn('min-w-0 rounded-xl px-3 py-2.5', tint)}>
+      <div className={cn(LABEL, 'mb-1.5')}>{title}</div>
+      {items.map((i) => (
+        <div key={i.key} className="mb-1 flex gap-2 text-[13px] leading-snug last:mb-0">
+          <span className={cn('font-black', TONE[i.tone].cls)}>{TONE[i.tone].mark}</span>
+          <span className="text-slate-700 dark:text-slate-200">{i.text}{i.early && <EarlySign />}</span>
+        </div>
+      ))}
+    </div>
+  );
   const flipButton = (label: string) => (
-    <button
-      type="button"
-      onClick={flip}
-      style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}
-    >
-      {label}
+    <button type="button" onClick={flip} className="inline-flex shrink-0 items-center gap-1 text-xs font-bold text-[var(--accent-deep)] hover:underline dark:text-[var(--accent)]">
+      {label}<RotateCw size={12} aria-hidden />
     </button>
   );
 
   const front = (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         {data.form.length > 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-            Last {data.form.length}:{' '}
-            {data.form.map((r, n) => (
-              <b key={n} style={{ color: r === 'W' ? good : r === 'L' ? bad : 'var(--ink-4)', marginRight: 4 }}>{r}</b>
-            ))}
-          </div>
+          <span className="flex items-center gap-1.5">
+            <span className={LABEL}>Last {data.form.length}</span>
+            {data.form.map((r, n) => <span key={n} className={cn('grid h-5 w-5 place-items-center rounded-md text-[10px] font-black', FORM_CHIP[r])}>{r}</span>)}
+          </span>
         ) : <span />}
-        {flipButton('How is this worked out? ↻')}
+        {flipButton('How is this worked out?')}
       </div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-        {block('Strengths', data.strengths, () => '✓', () => good)}
-        {block('Work on', data.weaknesses, () => '!', () => bad)}
-        {block('Trend', data.trends, (i) => (i.tone === 'up' ? '▲' : '▼'), (i) => (i.tone === 'up' ? good : bad))}
+      <div className="grid gap-2 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
+        {block('Strengths', data.strengths, 'bg-emerald-50/70 dark:bg-emerald-500/5')}
+        {block('Work on', data.weaknesses, 'bg-rose-50/70 dark:bg-rose-500/5')}
+        {block('Trend', data.trends, 'bg-slate-50 dark:bg-slate-800/40')}
       </div>
     </>
   );
@@ -242,37 +232,35 @@ function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: str
   const all = [...data.strengths, ...data.weaknesses, ...data.trends];
   const back = (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-          How these are worked out
-        </div>
-        {flipButton('← Back to insights')}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className={LABEL}>How these are worked out</span>
+        {flipButton('Back to insights')}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+      <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
         Counted from the points recorded by the scorer in locked matches. The figures are exact counts;
         whether one is called a strength or something to work on follows the rule shown under it.
         Where enough other players have played, you are compared with what is typical for them.
         Pressure figures come from singles when there is enough - in doubles they belong to the pair.
         An &ldquo;early sign&rdquo; is based on only a little data so far.
-      </div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+      </p>
+      <div className="grid gap-2 sm:grid-cols-[repeat(auto-fit,minmax(260px,1fr))]">
         {all.map((i) => (
-          <div key={`${i.tone}-${i.key}`} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', gap: 6, fontSize: 13, fontWeight: 600, lineHeight: 1.4 }}>
-              <span style={{ color: colourOf(i), fontWeight: 700 }}>{markOf(i)}</span>
+          <div key={`${i.tone}-${i.key}`} className="grid gap-1.5 rounded-xl border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+            <div className="flex gap-2 text-[13px] font-bold leading-snug">
+              <span className={cn('font-black', TONE[i.tone].cls)}>{TONE[i.tone].mark}</span>
               <span>{i.text}{i.early && <EarlySign />}</span>
             </div>
             {i.evidence && (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 2, fontSize: 12 }}>
+                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
                   {i.evidence.facts.map((f) => (
-                    <div key={f.label} style={{ display: 'contents' }}>
-                      <span style={{ color: 'var(--ink-4)' }}>{f.label}</span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2, inherit)' }}>{f.value}</span>
+                    <div key={f.label} className="contents">
+                      <span className="text-slate-500 dark:text-slate-400">{f.label}</span>
+                      <span className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{f.value}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>Rule: {i.evidence.rule}</div>
+                <div className="text-[11.5px] italic text-slate-500 dark:text-slate-400">Rule: {i.evidence.rule}</div>
               </>
             )}
           </div>
@@ -282,13 +270,9 @@ function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: str
   );
 
   return (
-    <div style={{ perspective: 1200, marginBottom: 12 }}>
-      <div
-        style={{
-          border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', display: 'grid', gap: 10,
-          transform: `rotateY(${angle}deg)`, transition: 'transform 180ms ease-in-out',
-        }}
-      >
+    <div className="mb-4 [perspective:1200px]">
+      <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 transition-transform duration-200 ease-in-out dark:border-slate-700 dark:bg-slate-900"
+        style={{ transform: `rotateY(${angle}deg)` }}>
         {face === 'front' ? front : back}
       </div>
     </div>
@@ -300,31 +284,25 @@ function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: st
   const [open, setOpen] = useState(false);
   const base = userId ? `/people/${userId}/sport-relations` : '/me/sport-relations';
   const { data, isLoading } = useApi<Relations>(open ? `${base}?sport=${sportId}` : null);
-  const heading = (title: string) => (
-    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', marginTop: 10 }}>{title}</div>
-  );
-  const row = (key: string, who: React.ReactNode, r: { won: number; lost: number; played: number }) => (
-    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
-      <span>{who}</span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>
-        {r.won}W {r.lost}L<span style={{ color: 'var(--ink-4)' }}>{'  ·  '}{r.played} played</span>
+  const row = (key: string, who: ReactNode, r: { won: number; lost: number; played: number }) => (
+    <div key={key} className="flex items-center justify-between gap-3 border-t border-slate-100 py-2 text-[13px] first:border-t-0 dark:border-slate-800">
+      <span className="min-w-0 text-slate-700 dark:text-slate-200">{who}</span>
+      <span className="shrink-0 text-xs font-bold tabular-nums">
+        <span className="text-emerald-600 dark:text-emerald-400">{r.won}W</span> <span className="text-rose-500">{r.lost}L</span>
+        <span className="font-semibold text-slate-400"> · {r.played} played</span>
       </span>
     </div>
   );
-  // Each match is one row, so the rows add up to the matches played. A doubles row
-  // names both pairs: "with Aman knights vs Aman devils / Aman Player 1".
+  // Each match is one row, so the rows add up to the matches played. A doubles row names both pairs.
   const opponents = (position: MatchPosition) => {
     const rows = data?.opponents.filter((o) => o.position === position) ?? [];
     if (!rows.length) return null;
     return (
-      <div>
-        {heading(position === 'singles' ? 'Singles' : 'Doubles')}
+      <div className="mt-2">
+        <div className={cn(LABEL, 'mb-1')}>{position === 'singles' ? 'Singles' : 'Doubles'}</div>
         {rows.map((o) => row(
           `${o.partnerId ?? ''}|${o.userIds.join('|')}`,
-          <>
-            {o.partnerName && <>with <b>{o.partnerName}</b>{' '}</>}
-            vs <b>{o.names.join(' / ')}</b>
-          </>,
+          <>{o.partnerName && <>with <b>{o.partnerName}</b>{' '}</>}vs <b>{o.names.join(' / ')}</b></>,
           o,
         ))}
       </div>
@@ -334,19 +312,15 @@ function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: st
   const shown = view === 'all' ? ['singles', 'doubles'] as const : [view] as const;
   const any = !!data?.opponents.some((o) => (shown as readonly string[]).includes(o.position));
   return (
-    <div style={{ marginTop: 12 }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)' }}
-      >
+    <div>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className={TOGGLE}>
         {open ? 'Hide' : 'Show'} {view === 'singles' ? 'head-to-head' : 'partners & head-to-head'}
+        <ChevronDown size={13} className={cn('transition', open && 'rotate-180')} aria-hidden />
       </button>
-      {open && (isLoading ? <Spinner /> : !any ? (
-        <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 6 }}>
-          No named opponents{view === 'all' ? '' : ` in ${view}`} yet - they appear once matches record who played.
-        </div>
+      {open && (isLoading ? <p className="mt-2 text-xs text-slate-400">Loading…</p> : !any ? (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">No named opponents{view === 'all' ? '' : ` in ${view}`} yet - they appear once matches record who played.</p>
       ) : (
-        <>{shown.map((p) => <div key={p}>{opponents(p)}</div>)}</>
+        <div className="mt-2 rounded-xl bg-slate-50/70 px-3 py-1 dark:bg-slate-800/30">{shown.map((p) => <div key={p}>{opponents(p)}</div>)}</div>
       ))}
     </div>
   );
@@ -355,6 +329,7 @@ function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: st
 type PlayView = 'all' | MatchPosition;
 
 function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
+  const iconOf = useSportIcon();
   const [open, setOpen] = useState(false);
   // Singles and doubles are different games; the split is one tap away when known.
   const [view, setView] = useState<PlayView>('all');
@@ -363,114 +338,90 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
   const shown = picked ? { overall: picked.overall, tiers: picked.tiers } : { overall: s.overall, tiers: s.tiers };
   // A ranking event has no opponent, so "won/lost" doesn't describe it.
   const ranking = isRankingSport(s.sport);
+  const headline = ranking ? podiumPct(shown.overall) : shown.overall.winPct;
+  const o = s.overall;
+
   return (
-    <Card>
-      <CardHeader
-        title={s.sport}
-        subtitle={
-          s.overall.lastOn
-            ? `Last played ${s.overall.lastOn}${s.overall.firstOn && s.overall.firstOn !== s.overall.lastOn ? ` · since ${s.overall.firstOn}` : ''}`
-            : undefined
-        }
-      />
-      <CardBody>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#0a1630] text-2xl" aria-hidden>{iconOf(s.sport)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-base font-black text-slate-900 dark:text-slate-100">{s.sport}</span>
+          {o.lastOn && <span className="block text-xs text-slate-500 dark:text-slate-400">Last played {fmtDate(o.lastOn)}{o.firstOn && o.firstOn !== o.lastOn ? ` · since ${fmtDate(o.firstOn)}` : ''}</span>}
+        </span>
+        {/* The one number someone came for: win rate, or podium rate in a ranking sport. */}
+        <span className="text-right">
+          <span className="block text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{headline != null ? `${headline}%` : '-'}</span>
+          <span className={LABEL}>{ranking ? 'Podium rate' : 'Win rate'}</span>
+        </span>
+      </div>
+
+      <div className="space-y-4 p-4">
         {positions.length > 0 && (
-          <div style={{ display: 'inline-flex', gap: 2, padding: 2, marginBottom: 10, borderRadius: 8, background: 'var(--line)' }}>
-            {(['all', ...positions.map((p) => p.position)] as PlayView[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                style={{
-                  cursor: 'pointer', border: 'none', borderRadius: 6, padding: '4px 12px',
-                  fontSize: 12.5, fontWeight: 600,
-                  background: view === v ? 'var(--surface-1)' : 'transparent',
-                  color: view === v ? 'var(--ink)' : 'var(--ink-4)',
-                }}
-              >
-                {v === 'all' ? 'All' : v === 'singles' ? 'Singles' : 'Doubles'}
-              </button>
-            ))}
-          </div>
+          <ViewTabs size="sm" value={view} onChange={setView}
+            options={(['all', ...positions.map((p) => p.position)] as PlayView[]).map((v) => ({ value: v, label: v === 'all' ? 'All' : v === 'singles' ? 'Singles' : 'Doubles' }))} />
         )}
 
-        {/* What the numbers mean, before the numbers - under the switch, which it follows.
-            Racquet sports only (the API says). */}
+        {/* What the numbers mean, before the numbers - under the switch, which it follows. */}
         {!ranking && <InsightsCard userId={userId} sportId={s.sportId} view={view} />}
 
         {/* The combined record leads, because it is the number somebody came for. */}
-        <div style={{ fontSize: 15.5 }}><Record r={shown.overall} ranking={ranking} /></div>
-        <Medals r={shown.overall} />
-        <Metrics metrics={shown.overall.metrics} />
-        {/* Doubles has both: pair tiles for the side, the rest personal. */}
-        {view !== 'singles' && positions.some((p) => p.position === 'doubles')
-          && shown.overall.metrics.some((m) => m.key === 'service_points_played') && (
-          <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 6 }}>
-            Doubles: "Points your pair served / received" count the whole pair. The other serve and receive tiles count only your own serves and returns.
-          </div>
-        )}
+        <div>
+          <div className="flex flex-wrap items-center gap-3"><Record r={shown.overall} ranking={ranking} /><Medals r={shown.overall} /></div>
+          <Metrics metrics={shown.overall.metrics} />
+          {/* Doubles has both: pair tiles for the side, the rest personal. */}
+          {view !== 'singles' && positions.some((p) => p.position === 'doubles') && shown.overall.metrics.some((m) => m.key === 'service_points_played') && (
+            <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">Doubles: "Points your pair served / received" count the whole pair. The other serve and receive tiles count only your own serves and returns.</p>
+          )}
+        </div>
 
-        {/* The split. Shown only when there IS one - a person who has only played
-            inter-institution has no intra record, and a zeroed row would read as
-            something missing rather than something that never happened. */}
+        {/* The split, only when there IS one - a zeroed row would read as something missing. */}
         {shown.tiers.length > 1 && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{
-              fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em',
-              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 2,
-            }}>By competition level</div>
-            {shown.tiers.map((t) => <TierRow key={t.tier} r={t} ranking={ranking} />)}
+          <div>
+            <div className={cn(LABEL, 'mb-1')}>By competition level</div>
+            <div className="rounded-xl border border-slate-100 px-3 dark:border-slate-800">{shown.tiers.map((t) => <TierRow key={t.tier} r={t} ranking={ranking} />)}</div>
           </div>
         )}
-        {shown.tiers.length === 1 && (
-          <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>
-            All {shown.tiers[0].label.toLowerCase()}.
-          </div>
-        )}
+        {shown.tiers.length === 1 && <p className="text-xs text-slate-500 dark:text-slate-400">All {shown.tiers[0].label.toLowerCase()}.</p>}
 
-        {!ranking && <PeopleSection userId={userId} sportId={s.sportId} view={view} />}
-
-        {view === 'all' && s.disciplines.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <button
-              onClick={() => setOpen((v) => !v)}
-              style={{
-                cursor: 'pointer', background: 'none', border: 'none', padding: 0,
-                fontSize: 12.5, fontWeight: 600, color: 'var(--brand)',
-              }}
-            >
+        <div className="flex flex-wrap gap-2">
+          {!ranking && <PeopleSection userId={userId} sportId={s.sportId} view={view} />}
+          {view === 'all' && s.disciplines.length > 0 && (
+            <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className={cn(TOGGLE, 'self-start')}>
               {open ? 'Hide' : 'Show'} {s.disciplines.length} discipline{s.disciplines.length === 1 ? '' : 's'}
+              <ChevronDown size={13} className={cn('transition', open && 'rotate-180')} aria-hidden />
             </button>
-            {open && (
-              <div style={{ marginTop: 8 }}>
-                {s.disciplines.map((d) => (
-                  <div key={d.disciplineId} style={{ padding: '10px 0', borderTop: '1px solid var(--line)' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', alignItems: 'baseline' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, minWidth: 150 }}>{d.discipline}</span>
-                      <span style={{ fontSize: 13.5 }}><Record r={d.overall} ranking={ranking} /></span>
-                    </div>
-                    {/* A team discipline names the rubbers inside it: "Mixed · Men's Singles rubber · 0W 1L". */}
-                    {d.rubbers?.map((r) => (
-                      <div key={r.label} style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
-                        {d.discipline} · {r.label} rubber · {r.won}W {r.lost}L
-                        {r.played > r.won + r.lost && <span style={{ color: 'var(--ink-4)' }}> · {r.played} played</span>}
-                      </div>
-                    ))}
-                    {d.tiers.length > 1 && (
-                      <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 3 }}>
-                        {d.tiers.map((t) => ranking
-                          ? `${t.label}: ${t.played} played${podiumPct(t) != null ? `, ${podiumPct(t)}% podium` : ''}`
-                          : `${t.label}: ${t.played} played, ${t.won}W ${t.lost}L`).join('  ·  ')}
-                      </div>
-                    )}
-                    <Metrics metrics={d.overall.metrics} dense />
+          )}
+        </div>
+        {view === 'all' && open && (
+          <div className="rounded-xl border border-slate-100 px-3 dark:border-slate-800">
+            {s.disciplines.map((d) => (
+              <div key={d.disciplineId} className="border-t border-slate-100 py-3 first:border-t-0 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{d.discipline}</span>
+                  <Record r={d.overall} ranking={ranking} size="sm" />
+                </div>
+                {/* A team discipline names the rubbers inside it: "Mixed · Men's Singles rubber · 0W 1L". */}
+                {d.rubbers?.map((r) => (
+                  <div key={r.label} className="mt-1 text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                    {d.discipline} · {r.label} rubber · {r.won}W {r.lost}L
+                    {r.played > r.won + r.lost && <span className="text-slate-400"> · {r.played} played</span>}
                   </div>
                 ))}
+                {d.tiers.length > 1 && (
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {d.tiers.map((t) => ranking
+                      ? `${t.label}: ${t.played} played${podiumPct(t) != null ? `, ${podiumPct(t)}% podium` : ''}`
+                      : `${t.label}: ${t.played} played, ${t.won}W ${t.lost}L`).join('  ·  ')}
+                  </div>
+                )}
+                <Metrics metrics={d.overall.metrics} dense />
               </div>
-            )}
+            ))}
           </div>
         )}
-      </CardBody>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -484,70 +435,65 @@ export function SportStatsPanel({ userId }: { userId?: string }) {
   const base = userId ? `/people/${userId}/sport-stats` : '/me/sport-stats';
   const { data, isLoading } = useApi<Payload>(`${base}${qs.toString() ? `?${qs}` : ''}`);
 
-  // The discipline list follows the chosen sport, because offering every discipline
-  // on the platform under a sport filter is offering a dropdown nobody can use.
+  // The discipline list follows the chosen sport; with none chosen the sport goes in
+  // front, so three identical "Men's" options each say what they are.
   const disciplines = useMemo(() => {
     if (!data) return [];
     if (sportId) {
-      return (data.filters.find((f) => f.sportId === sportId)?.disciplines ?? [])
-        .map((d) => ({ ...d, label: d.name }));
+      return (data.filters.find((f) => f.sportId === sportId)?.disciplines ?? []).map((d) => ({ value: d.id, label: d.name }));
     }
-    // With no sport chosen the list spans every sport, and half of them call their
-    // discipline "Men's" - three identical options nobody can choose between. The
-    // sport goes in front, so each one says what it is.
-    return data.filters.flatMap((f) =>
-      f.disciplines.map((d) => ({ ...d, label: `${f.sport} · ${d.name}` })));
+    return data.filters.flatMap((f) => f.disciplines.map((d) => ({ value: d.id, label: `${f.sport} · ${d.name}` })));
   }, [data, sportId]);
 
-  if (isLoading) return <Spinner />;
+  if (isLoading) {
+    return (
+      <div className="space-y-4" role="status" aria-label="Loading">
+        <span className="block h-9 w-80 max-w-full animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+        {[0, 1].map((i) => <span key={i} className="block h-56 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />)}
+      </div>
+    );
+  }
   if (!data || !data.sports.length) {
     return (
       <EmptyState
-        icon="▦"
+        icon={<Trophy size={22} />}
         title={sportId || disciplineId ? 'Nothing under that filter' : 'No statistics yet'}
-        description={
-          sportId || disciplineId
-            ? 'You have no record in that sport or discipline. Clear the filter to see everything.'
-            : 'Your record fills in as results are made official. Play a match and ask the organiser to lock the scorecard.'
-        }
+        description={sportId || disciplineId
+          ? 'You have no record in that sport or discipline. Clear the filter to see everything.'
+          : 'Your record fills in as results are made official. Play a match and ask the organiser to lock the scorecard.'}
+        action={sportId || disciplineId ? <button type="button" onClick={() => { setSportId(''); setDisciplineId(''); }}><X size={14} aria-hidden />Clear filters</button> : undefined}
       />
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <label style={{ display: 'grid', gap: 3, minWidth: 180 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Sport</span>
-          <Select className="w-full" value={sportId} onChange={(e) => { setSportId(e.target.value); setDisciplineId(''); }}>
-            <option value="">All sports</option>
-            {[...data.filters].sort((a, b) => a.sport.localeCompare(b.sport)).map((f) => <option key={f.sportId} value={f.sportId}>{f.sport}</option>)}
-          </Select>
-        </label>
-        <label style={{ display: 'grid', gap: 3, minWidth: 200 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Discipline</span>
-          <Select className="w-full" value={disciplineId} onChange={(e) => setDisciplineId(e.target.value)} disabled={!disciplines.length}>
-            <option value="">All disciplines</option>
-            {disciplines.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-          </Select>
-        </label>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-full sm:w-48">
+          <PickList value={sportId} onChange={(v) => { setSportId(v); setDisciplineId(''); }} ariaLabel="Sport" className={PILL_PICK} searchPlaceholder="Search sports"
+            options={[{ value: '', label: 'All sports' }, ...[...data.filters].sort((a, b) => a.sport.localeCompare(b.sport)).map((f) => ({ value: f.sportId, label: f.sport }))]} />
+        </div>
+        {disciplines.length > 0 && (
+          <div className="w-full sm:w-60">
+            <PickList value={disciplineId} onChange={setDisciplineId} ariaLabel="Discipline" className={PILL_PICK} searchPlaceholder="Search disciplines"
+              options={[{ value: '', label: 'All disciplines' }, ...disciplines]} />
+          </div>
+        )}
         {(sportId || disciplineId) && (
-          <button
-            onClick={() => { setSportId(''); setDisciplineId(''); }}
-            style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '0 0 9px', fontSize: 12.5, fontWeight: 600, color: 'var(--brand)' }}
-          >
-            Clear
+          <button type="button" onClick={() => { setSportId(''); setDisciplineId(''); }}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-50 dark:text-rose-300 dark:ring-rose-500/30">
+            <X size={12} aria-hidden />Clear
           </button>
         )}
       </div>
 
       {data.sports.map((s) => <SportCard key={s.sportId} s={s} userId={userId} />)}
 
-      <p style={{ fontSize: 11.5, color: 'var(--ink-4)', margin: 0 }}>
-        Only results from locked scorecards count. A result that is unlocked for a
-        correction drops out until it is locked again - these figures are rebuilt from
-        the record each time, never adjusted by hand.
+      <p className="flex items-start gap-2 text-[11.5px] text-slate-500 dark:text-slate-400">
+        <ShieldCheck size={14} className="mt-px shrink-0 text-emerald-600" aria-hidden />
+        Only results from locked scorecards count. A result unlocked for a correction drops out until it is locked again - these figures are rebuilt from the record each time, never adjusted by hand.
       </p>
     </div>
   );
 }
+
